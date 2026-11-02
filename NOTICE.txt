@@ -1,0 +1,19 @@
+SparseDVFS v5 independent reference port
+
+This is not the authors' C++ source and does not reproduce their hardware register protocol.
+Paper authority: https://arxiv.org/html/2603.21908v1
+Author repository snapshot: c524c51aac552fd16bec5743b1fb95309b46347b
+The inspected snapshot contains SparseDVFS.py only and no license file.
+v5 records a pinned upstream URL/hash instead of redistributing that script. Earlier v1-v4 packages are unchanged.
+
+Additional sources (reference patterns only; no new third-party source copied):
+- vLLM v0.19.0 / commit 2a69949bdadf0e8942b7a1619b229cb475beef20: Apache-2.0
+- ml-energy/zeus commit 8886068ae0f2846b602b186c0b484bd97d00ee19: Apache-2.0
+- rbonghi/jetson_stats commit cb030ddae0b87becd10e7b62c33bdf210aae84ba: repository AGPL-3.0; some files carry different SPDX headers. No code copied.
+- imec-nu/PELM commit 1c23267ac23948abbd057f9b8116feafb3e7b266: no license file observed. Links/analysis only.
+- PyTorch dispatcher documentation/source: API reference only; actual image source/version/hash is recorded on Thor, not assumed from main.
+- FUSE paper https://arxiv.org/html/2507.02135v1 : Android/llama.cpp phase policy; memory governor remains default, unlike SparseDVFS triplet scheduling.
+
+All synthetic traces, coefficients, capacities and OPPs are illustrative and nondeployable.
+No model weights, datasets, container image, compiled extensions or reproduced device results are included.
+Source provenance is recorded in SOURCE_MANIFEST.json and paper2code/00_reference_search.yaml.

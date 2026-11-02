@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+build/
+models/
+runs/
+virtual_results/
+*.so
+*.dll
+*.exe
+*.iso
+*.apk
+.env
+bridge.jsonl
+*.token

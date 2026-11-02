@@ -1,0 +1,58 @@
+{
+  "python_ast": {
+    "status": "PASS",
+    "count": 48
+  },
+  "bash_syntax": {
+    "status": "PASS",
+    "count": 7
+  },
+  "markdown_bash_syntax": {
+    "status": "PASS",
+    "blocks": 15
+  },
+  "json": {
+    "status": "PASS",
+    "count": 16
+  },
+  "yaml_json_subset": {
+    "status": "PASS",
+    "files": [
+      "paper2code/00_reference_search.yaml",
+      "paper2code/02_concept_analysis.yaml",
+      "paper2code/03_implementation_plan.yaml",
+      "paper2code/04_verification.yaml"
+    ]
+  },
+  "other_yaml": "Manually reviewed; no YAML parser installed",
+  "cpp_structural": {
+    "status": "PASS",
+    "records": [
+      {
+        "file": "cpp/CUDAFUSE.cpp",
+        "issues": []
+      },
+      {
+        "file": "cpp/CUDAFUSE.h",
+        "issues": []
+      },
+      {
+        "file": "cpp/FUSE.cpp",
+        "issues": []
+      },
+      {
+        "file": "cpp/FUSE.h",
+        "issues": []
+      },
+      {
+        "file": "cpp/TensorRTFUSE.hpp",
+        "issues": []
+      },
+      {
+        "file": "examples/tensorrt_enqueue_adapter.cpp",
+        "issues": []
+      }
+    ],
+    "caveat": "Existing tree_sitter_cpp, CUDART_CB/extern-C guards normalized; NOT compilation/type/API checking"
+  }
+}

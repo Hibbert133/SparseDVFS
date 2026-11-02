@@ -1,0 +1,8 @@
+{
+  "backend": "bridge",
+  "uuid": "GPU-REPLACE-WITH-TARGET-UUID",
+  "host": "127.0.0.1",
+  "port": 50900,
+  "default_auto_ack": true,
+  "rates_mhz": [900, 1500, 2100]
+}

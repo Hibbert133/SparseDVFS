@@ -1,0 +1,14 @@
+{
+  "host_system_installs": false,
+  "host_clock_writes": false,
+  "guest": "Alpine Linux x86_64 in portable QEMU TCG",
+  "guest_root": "RAM-backed",
+  "host_disks_attached": false,
+  "input_disk": "read-only source/package tar",
+  "real_gpu_present": false,
+  "native_library_sha256": "d3baff6ade3363cd39342abcc7f537aae16b37fd57073b319e3c7455f27037b7",
+  "native_library_target": "Linux x86_64 musl; validation-only; rebuild in target container",
+  "compiler_command": "g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fPIC -shared -pthread cpp/FUSE.cpp -o build/libfuse_dvfs.so",
+  "packages_manifest_sha256": "793a6a2c2f9209fea9c023ba0df5011287e93928875f5437fb61be972be35ed6",
+  "resolved_first_attempt_issue": "Minimal guest loopback was down; enabled only inside guest and reran successfully"
+}

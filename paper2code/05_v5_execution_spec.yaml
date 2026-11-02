@@ -1,0 +1,30 @@
+phase: 'v5 pre-implementation extraction and specification'
+scope: 'Dual module/dispatcher-operator adaptation, evidence gates, calibration and timing; no hardware runtime here.'
+authority:
+  paper: 'https://arxiv.org/html/2603.21908v1'
+  precedence: 'Paper equations/pseudocode precede related code; reference patterns do not replace the algorithm.'
+equations:
+  eq1: 'max(W*(1-S_comp)/P_peak(cpu,gpu), D*(1-S_mem)/B_mem(emc)) + overhead'
+  eq2: 'alpha(S_comp)*V^2*f + (k1*T+k2)*V; scalar projection and rail scope must be explicit'
+  eq3: 'block_time > N*switch_time; Algorithm 1 equality/terminal exceptions remain visible'
+algorithm1: 'Topological order; short OR similar merges; componentwise max; append terminal block unconditionally.'
+target:
+  model: 'Qwen/Qwen3.5-27B revision fc05daec18b0a78c049392ed2e771dde82bdf654'
+  shape_expectations: ['prefill hidden approximately [512,5120]', 'decode hidden approximately [1,5120]', 'actual padding/strides must be observed']
+  layers: '64 = 48 linear attention + 16 full attention'
+  runtime: 'vLLM 0.19.0 pinned Thor image; eager, TP=PP=DP=1, one request; normal KV/Mamba cache'
+  effective_sparsity: 'S_comp=S_mem=0; no proven skip/compression kernel'
+implementation_choices:
+  granularity: 'module default; operator via TorchDispatchMode, opaque fused operators stay atomic'
+  operator_identity: 'parent module + dispatch ordinal + operator overload + tensor metadata + scheduler context'
+  coverage: 'Three post-warmup requests; correlate marked operators to CUDA launches/kernels; fail closed for missing or auxiliary-stream work'
+  profile: 'Separate context signatures; no averaging all decode lengths into one operator row'
+  frequency: 'One main stream; immediate sysfs requests are not the unpublished hardware instruction queue'
+  switch: 'Ten repetitions per directed non-noop transition; conservative global p95'
+  calibration: 'Observed V/f/T/power, supplied workload provenance, full-rank shared-coefficient regression, held-out validation'
+missing_evidence:
+  - 'No Thor, CUDA, vLLM, PyTorch GPU execution or native compilation available in this task'
+  - 'Unknown physical PLL settling and author register queue protocol'
+  - 'Unknown FLOP/real-DRAM traffic for opaque Qwen attention/GatedDeltaNet kernels'
+  - 'No real voltage/temperature coverage or fitted Thor coefficients'
+verification: 'Generate code; run feasible static and synthetic checks; target/experimental checks remain pending.'

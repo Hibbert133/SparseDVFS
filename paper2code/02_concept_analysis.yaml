@@ -1,0 +1,39 @@
+{
+  "phase": 2,
+  "format": "JSON subset of YAML 1.2",
+  "core": "Unchanged Eq1/Eq2 + literal Algorithm1 + ownership/event reference",
+  "module": "68 fixed module/method scopes, default",
+  "operator": "TorchDispatchMode leaves and atomic fused calls; original executed exactly once",
+  "data_flow": [
+    "scheduler metadata",
+    "dispatcher/module scope",
+    "signature and evidence gates",
+    "frequency table or calibrated predictions",
+    "Algorithm1 blocks",
+    "Schedule",
+    "C++ FUSE/CUDA events",
+    "separate request energy/report"
+  ],
+  "evidence_gates": [
+    "native output hash",
+    "three complete requests",
+    "context/shape/order equality",
+    "same-thread launch ownership and CUDA correlation",
+    "single observed GPU stream/device",
+    "every used OPP certified"
+  ],
+  "calibration": "Known workloads + capacity estimates + isolated same-rail power; shared thermal QR, per-unit alpha, held-out validation",
+  "unresolved": [
+    "Opaque Qwen FLOP/real-DRAM traffic",
+    "physical scalar V/f projection",
+    "future hidden stream changes",
+    "author register queue",
+    "physical PLL settling"
+  ],
+  "self_check": {
+    "no_layer_replay": true,
+    "no_cache_disable": true,
+    "unknown_values_not_fabricated": true,
+    "measured_proxy_separate_from_energy": true
+  }
+}

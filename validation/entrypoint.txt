@@ -1,0 +1,3 @@
+{"total": 163, "passed": 160, "successful": true}
+Skipped: 3 Output: /tmp/demo/validation
+All CPU/native mock requirements passed; CUDA tests explicitly remain unverified.

@@ -1,0 +1,8 @@
+{
+  "kind": "direct",
+  "path": "/sys/class/hwmon/REPLACE_FROM_DOCTOR/power1_input",
+  "scale_to_w": 0.000001,
+  "sensor": "REPLACE_WITH_ACTUAL_SENSOR",
+  "label": "REPLACE_WITH_ACTUAL_RAIL_LABEL",
+  "scope": "REPLACE_WITH_VERIFIED_MEASUREMENT_SCOPE"
+}

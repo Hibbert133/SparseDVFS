@@ -1,0 +1,281 @@
+{
+  "synthetic": true,
+  "dvfs_applied": false,
+  "identity": {
+    "fixture": true
+  },
+  "units": [
+    "embed",
+    "layer.0",
+    "layer.1",
+    "head"
+  ],
+  "reference": [
+    200,
+    2000,
+    10000
+  ],
+  "candidates": [
+    {
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "operators": [
+        {
+          "phase": "prefill",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        }
+      ]
+    },
+    {
+      "triplet": [
+        200,
+        1000,
+        10000
+      ],
+      "operators": [
+        {
+          "phase": "prefill",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        }
+      ]
+    },
+    {
+      "triplet": [
+        100,
+        2000,
+        10000
+      ],
+      "operators": [
+        {
+          "phase": "prefill",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 10,
+          "sparsity_exact_zero": 0.0
+        }
+      ]
+    },
+    {
+      "triplet": [
+        200,
+        2000,
+        10000
+      ],
+      "operators": [
+        {
+          "phase": "prefill",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "prefill",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "embed",
+          "latency_ms": 3,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.0",
+          "latency_ms": 4,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "layer.1",
+          "latency_ms": 5,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        },
+        {
+          "phase": "decode",
+          "name": "head",
+          "latency_ms": 6,
+          "power_w": 20,
+          "sparsity_exact_zero": 0.0
+        }
+      ]
+    }
+  ],
+  "note": "SYNTHETIC TEST DATA ONLY. Not measured on Thor or Qwen. Deployment is forbidden."
+}

@@ -1,0 +1,72 @@
+{
+  "real_hardware_measured": false,
+  "caveat": "Assumed values demonstrate sensitivity; no RTX 5090 benefit claim",
+  "scenarios": [
+    {
+      "name": "benefit",
+      "synthetic": true,
+      "assumptions": {
+        "low_ms": 10,
+        "low_w": 100,
+        "switch_ms": 1,
+        "overlap_model": "optimistic, ignores early high-clock residency"
+      },
+      "fixed": {
+        "time_ms": 40,
+        "energy_j": 8
+      },
+      "serial": {
+        "time_ms": 43,
+        "energy_j": 6.6
+      },
+      "lookahead": {
+        "time_ms": 40,
+        "energy_j": 6.0
+      }
+    },
+    {
+      "name": "no_benefit",
+      "synthetic": true,
+      "assumptions": {
+        "low_ms": 10,
+        "low_w": 200,
+        "switch_ms": 0,
+        "overlap_model": "optimistic, ignores early high-clock residency"
+      },
+      "fixed": {
+        "time_ms": 40,
+        "energy_j": 8
+      },
+      "serial": {
+        "time_ms": 40,
+        "energy_j": 8.0
+      },
+      "lookahead": {
+        "time_ms": 40,
+        "energy_j": 8.0
+      }
+    },
+    {
+      "name": "negative",
+      "synthetic": true,
+      "assumptions": {
+        "low_ms": 20,
+        "low_w": 180,
+        "switch_ms": 20,
+        "overlap_model": "optimistic, ignores early high-clock residency"
+      },
+      "fixed": {
+        "time_ms": 40,
+        "energy_j": 8
+      },
+      "serial": {
+        "time_ms": 120,
+        "energy_j": 23.2
+      },
+      "lookahead": {
+        "time_ms": 90,
+        "energy_j": 17.2
+      }
+    }
+  ]
+}

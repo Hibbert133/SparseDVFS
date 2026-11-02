@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "method": "git apply --check and forward apply on a temporary v4 copy",
+  "git_configuration": "-c core.autocrlf=false for this process only",
+  "all_nonexcluded_files_byte_identical": true,
+  "excluded_generated_files": [
+    "CHANGES_FROM_V4.diff",
+    "DIFF_VALIDATION.json",
+    "SHA256SUMS"
+  ],
+  "upstream_deletion": "forward-only literal-empty Git binary patch, no old script body",
+  "original_v4_modified": false
+}

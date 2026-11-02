@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "origin": "clean_room_reference_port",
+  "synthetic": true,
+  "identity": {
+    "fixture": true
+  },
+  "units": [
+    "embed",
+    "layer.0",
+    "layer.1",
+    "head"
+  ],
+  "reference": [
+    200,
+    2000,
+    10000
+  ],
+  "selector": "measured",
+  "memory_policy": "calibrated",
+  "switch_us": 100,
+  "aggregation_factor_N": 5,
+  "similarity": {
+    "rule": "relative_L_infinity",
+    "tolerance": 0.05
+  },
+  "max_operator_slowdown": 0.05,
+  "blocks": [
+    {
+      "phase": "prefill",
+      "operators": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "head"
+      ],
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "block_id": 0,
+      "estimated_ms": 18,
+      "amortized_strict_gt": true
+    },
+    {
+      "phase": "decode",
+      "operators": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "head"
+      ],
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "block_id": 1,
+      "estimated_ms": 18,
+      "amortized_strict_gt": true
+    }
+  ],
+  "operator_choices": [
+    {
+      "phase": "prefill",
+      "name": "embed",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 3,
+      "energy_proxy_j": 0.03,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "prefill",
+      "name": "layer.0",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 4,
+      "energy_proxy_j": 0.04,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "prefill",
+      "name": "layer.1",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 5,
+      "energy_proxy_j": 0.05,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "prefill",
+      "name": "head",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 6,
+      "energy_proxy_j": 0.06,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "decode",
+      "name": "embed",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 3,
+      "energy_proxy_j": 0.03,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "decode",
+      "name": "layer.0",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 4,
+      "energy_proxy_j": 0.04,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "decode",
+      "name": "layer.1",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 5,
+      "energy_proxy_j": 0.05,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    },
+    {
+      "phase": "decode",
+      "name": "head",
+      "triplet": [
+        100,
+        1000,
+        10000
+      ],
+      "latency_ms": 6,
+      "energy_proxy_j": 0.06,
+      "sparsity_exact_zero": 0.0,
+      "resource_class": "unclassified_measured",
+      "s_comp": 0.0,
+      "s_mem": 0.0
+    }
+  ],
+  "degraded_no_emc": false,
+  "power_attribution": "whole_inference_average_proxy",
+  "runtime_granularity": "Qwen_text_modules_in_execution_order",
+  "limitations": [
+    "not the author C++ source",
+    "explicit stream integration, not transparent CUDA/TensorRT interception",
+    "decoder modules are coarser than the paper operator DAG",
+    "GPU start observation anchors a prediction; driver/physical transition overlap must be measured",
+    "module slowdown limit is not an end-to-end SLO guarantee"
+  ]
+}

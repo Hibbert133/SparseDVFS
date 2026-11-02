@@ -1,0 +1,40 @@
+{
+  "phase": 3,
+  "format": "JSON subset of YAML 1.2",
+  "base": "Independent v5 copied from v4; v1-v4 kept unchanged",
+  "implemented": [
+    "dual granularity worker scopes",
+    "per-context layouts and operator rows",
+    "global and per-OPP coverage certificates",
+    "calibrate collect/fit/validate with explicit pending inputs",
+    "known-mm static descriptor provider",
+    "ten repetitions per directed transition excluding noops",
+    "ABI5 callback/observation timing fields",
+    "operator plan granularity/version/used-OPP guards",
+    "report not_exercised when no advance resource request"
+  ],
+  "public_interfaces": {
+    "granularity": "module|operator",
+    "backend": "torch",
+    "calibration_stages": [
+      "collect",
+      "fit",
+      "validate"
+    ],
+    "required_plan_flags": [
+      "selector",
+      "max-slowdown",
+      "similarity-tolerance"
+    ],
+    "strict_fit": "explicit max-relative-error; real isolated inputs and held-out pass",
+    "protocol": "v5_vllm019_dual_granularity_single_request_main_stream",
+    "abi": 5
+  },
+  "unavailable_runtime": "No installation or device access was attempted; generated target paths remain unverified",
+  "self_check": {
+    "source_generated": true,
+    "interfaces_documented": true,
+    "failures_fail_closed": true,
+    "preservation_checked": true
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "repository": "https://github.com/ziyangzhang96/SparseDVFS",
+  "commit": "c524c51aac552fd16bec5743b1fb95309b46347b",
+  "branch": "main",
+  "tree_entries": [
+    "SparseDVFS.py"
+  ],
+  "paper": "https://arxiv.org/html/2603.21908v1",
+  "vendor": {
+    "file": "vendor/SparseDVFS.py",
+    "bytes": 54178,
+    "git_blob_sha1": "50691aa6c3b11b71e4925eb1361481fae7d779ff",
+    "sha256": "757e21c5797aea7a035854b5ab21184bf93e60bad38a9bad442b122e34093564",
+    "url": "https://raw.githubusercontent.com/ziyangzhang96/SparseDVFS/c524c51aac552fd16bec5743b1fb95309b46347b/SparseDVFS.py",
+    "modified": false,
+    "distributed": false,
+    "note": "Reference URL/hash retained; upstream script not included in v5. Diff uses forward binary deletion without redistributing its body."
+  },
+  "original_cpp_fuse_published_in_this_snapshot": false,
+  "demo_version": 5,
+  "checked_date": "2026-10-30",
+  "author_tree_rechecked_via": "GitHub connector git/trees/main",
+  "author_tree_unchanged": true,
+  "implementation_origin": "Independent dual-granularity paper reference port; not author C++",
+  "skill": "paper2code local adapted installation",
+  "versions": "VERSIONS.json",
+  "new_core_files": [
+    "sparsedvfs_vllm/operators.py",
+    "sparsedvfs_vllm/operator_contracts.py",
+    "sparsedvfs/calibration_fit.py",
+    "sparsedvfs_vllm/calibration.py",
+    "sparsedvfs_vllm/workloads.py",
+    "v5_demo.py"
+  ],
+  "cpp_changes": [
+    {
+      "file": "cpp/CUDAFUSE.cpp",
+      "v4_sha256": "213ab8caf9b5c31bb27aaa9640c997dec81a50201e85c4e1663668472e70935c",
+      "v5_sha256": "29cc07eec8e948bf1a8ed1b33d774269e734f900c94aa4005b3635990f40c4d2"
+    },
+    {
+      "file": "cpp/CUDAFUSE.h",
+      "v4_sha256": "e43c4e1079448bea9e89cdc624007007a1bb95c4707115d7e794ceffad4aea2f",
+      "v5_sha256": "d46b47afb0f39510b647a24cbeb875945a0569ffebae14497222d24ada3b187c"
+    },
+    {
+      "file": "cpp/FUSE.cpp",
+      "v4_sha256": "8c5febd6d65d1657ebf83b6b62546d712a961e29388d8ed4cdc55b6bf2e7350a",
+      "v5_sha256": "a9469d187d03736a9a85d9dbde8488a9db75ed75aee179993cf902e3853de739"
+    },
+    {
+      "file": "cpp/FUSE.h",
+      "v4_sha256": "cd4496a15e7cfbb61bb06ad02102dba03145f41dfaa93f52b6e9bf60a33fce4d",
+      "v5_sha256": "577c43f1365d21b218ea672740d6debeae364d3cd53c6bada09b2d0bf488c31e"
+    }
+  ],
+  "native_changes_executed": false,
+  "earlier_archive_sha256": {
+    "sparsedvfs_thor_qwen35_demo": "6bb024e405689d5f924c07bccf450735efc56070d891b351bafcdc6cd893e682",
+    "sparsedvfs_thor_qwen35_demo_v2": "2ae0333190f3b28dd0511c221831ed2308633ada53b2cbba7277aa9383c3d722",
+    "sparsedvfs_thor_qwen35_demo_v3": "317e6a6a87a85a3831eb986cc40d96046933f37c9b8bdf54863044cb0cbe20b6",
+    "sparsedvfs_thor_qwen35_demo_v4": "497ef2afe9419356552b11d4c576309f21556e5299302218c0a2b69a2dc308b5"
+  },
+  "local_changes": "New v5 package, workspace helpers and temporary mock/test artifacts only; no installs, model/image downloads, services or real frequency writes",
+  "evidence": "Static checks and synthetic execution; no native compilation or device/paper experiment reproduction",
+  "research_checked_date": "2026-10-29",
+  "preservation": [
+    {
+      "package": "sparsedvfs_thor_qwen35_demo",
+      "archive_sha256": "6bb024e405689d5f924c07bccf450735efc56070d891b351bafcdc6cd893e682",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v2",
+      "archive_sha256": "2ae0333190f3b28dd0511c221831ed2308633ada53b2cbba7277aa9383c3d722",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v3",
+      "archive_sha256": "317e6a6a87a85a3831eb986cc40d96046933f37c9b8bdf54863044cb0cbe20b6",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v4",
+      "archive_sha256": "497ef2afe9419356552b11d4c576309f21556e5299302218c0a2b69a2dc308b5",
+      "internal_checksums": "PASS"
+    }
+  ],
+  "references": [
+    {
+      "name": "vLLM",
+      "repo": "https://github.com/vllm-project/vllm",
+      "commit": "2a69949bdadf0e8942b7a1619b229cb475beef20",
+      "ref": "v0.19.0",
+      "license": "Apache-2.0",
+      "relevance": "Exact target Worker/profiler and model execution APIs",
+      "adopted": "Profiler config and scoped worker integration; no installed-source patch",
+      "not_adopted": "Other model versions, graph/batching/multi-worker execution",
+      "source": "vllm/config/profiler.py; docs/contributing/profiling.md"
+    },
+    {
+      "name": "PyTorch dispatcher",
+      "repo": "https://github.com/pytorch/pytorch",
+      "commit": "628d01c0180e71462a0f56fc537de9fb9abd0c3f",
+      "license": "BSD-style three-clause terms verified in LICENSE; additional notices present",
+      "relevance": "TorchDispatchMode scoped observation API",
+      "adopted": "Original dispatcher call exactly once, no tensor subclass/replay",
+      "not_adopted": "Main-branch version as a runtime pin; image source/version/hash must be recorded on Thor",
+      "source": "torch/utils/_python_dispatch.py API; LICENSE"
+    },
+    {
+      "name": "Zeus Jetson",
+      "repo": "https://github.com/ml-energy/zeus",
+      "commit": "8886068ae0f2846b602b186c0b484bd97d00ee19",
+      "license": "Apache-2.0",
+      "relevance": "Per-rail discovery and energy-window accounting",
+      "adopted": "Measurement/provenance patterns only",
+      "not_adopted": "Assuming legacy INA paths or mW units apply to Thor hwmon",
+      "source": "zeus/device/soc/jetson.py; LICENSE"
+    },
+    {
+      "name": "jetson-stats",
+      "repo": "https://github.com/rbonghi/jetson_stats",
+      "commit": "cb030ddae0b87becd10e7b62c33bdf210aae84ba",
+      "license": "Repository AGPL-3.0; individual provider file GPL-3.0-or-later headers observed; no code copied",
+      "relevance": "Thor VIN/module rail distinction and platform-specific controls",
+      "adopted": "Source comparison and optional pre-existing jtop client interface",
+      "not_adopted": "Copying AGPL/GPL source or automatically installing/restarting a service",
+      "source": "jtop/core/power.py; thor_power.py; jetsonpower_provider.py; LICENSE"
+    },
+    {
+      "name": "PELM",
+      "repo": "https://github.com/imec-nu/PELM",
+      "commit": "1c23267ac23948abbd057f9b8116feafb3e7b266",
+      "license": "No license file observed in inspected complete tree; reference links only",
+      "relevance": "Jetson LLM frequency/node adaptation pitfalls",
+      "adopted": "Interface comparison only; no copied implementation",
+      "not_adopted": "Speculative decoding, early exits, DQN, fan/PWM/nvpmodel edits, privileged whole-/sys mount",
+      "source": "README.md; utils/Manager.py"
+    }
+  ],
+  "additional_papers": [
+    {
+      "title": "FUSE / Dissecting the Impact of Mobile DVFS Governors on LLM Inference Performance and Energy Efficiency",
+      "url": "https://arxiv.org/html/2507.02135v1#S6",
+      "role": "Android/llama.cpp phase policy and search; default memory governor is retained, unlike SparseDVFS"
+    },
+    {
+      "title": "E4",
+      "url": "https://arxiv.org/abs/2503.04865",
+      "role": "Cited same-author prior work; no verified code adopted"
+    },
+    {
+      "title": "DVFO",
+      "url": "https://arxiv.org/abs/2306.01811",
+      "role": "Cited same-author prior work; no DRL/offloading substituted"
+    }
+  ]
+}

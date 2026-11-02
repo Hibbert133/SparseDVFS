@@ -1,0 +1,3 @@
+# v5 installs no host Python packages. Use the digest-pinned Thor image.
+# PyTorch, CUDA, vLLM, transformers and huggingface_hub come from that image.
+# Build C++/CUDA only with container/Dockerfile; see THOR_VLLM_QUICKSTART_zh.md.

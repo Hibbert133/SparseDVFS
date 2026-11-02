@@ -1,0 +1,132 @@
+{
+  "demo_version": 5,
+  "checked_date": "2026-10-30",
+  "client_timezone": "Asia/Shanghai",
+  "code_generated": true,
+  "static_checked": true,
+  "synthetic_executed": true,
+  "unit_tests": {
+    "total": 143,
+    "passed": 134,
+    "skipped": 9,
+    "failures": 0,
+    "errors": 0
+  },
+  "static_checks": {
+    "python_ast": {
+      "status": "PASS",
+      "count": 48
+    },
+    "bash_syntax": {
+      "status": "PASS",
+      "count": 7
+    },
+    "markdown_bash_syntax": {
+      "status": "PASS",
+      "blocks": 15
+    },
+    "json": {
+      "status": "PASS",
+      "count": 16
+    },
+    "yaml_json_subset": {
+      "status": "PASS",
+      "files": [
+        "paper2code/00_reference_search.yaml",
+        "paper2code/02_concept_analysis.yaml",
+        "paper2code/03_implementation_plan.yaml",
+        "paper2code/04_verification.yaml"
+      ]
+    },
+    "other_yaml": "Manually reviewed; no YAML parser installed",
+    "cpp_structural": {
+      "status": "PASS",
+      "records": [
+        {
+          "file": "cpp/CUDAFUSE.cpp",
+          "issues": []
+        },
+        {
+          "file": "cpp/CUDAFUSE.h",
+          "issues": []
+        },
+        {
+          "file": "cpp/FUSE.cpp",
+          "issues": []
+        },
+        {
+          "file": "cpp/FUSE.h",
+          "issues": []
+        },
+        {
+          "file": "cpp/TensorRTFUSE.hpp",
+          "issues": []
+        },
+        {
+          "file": "examples/tensorrt_enqueue_adapter.cpp",
+          "issues": []
+        }
+      ],
+      "caveat": "Existing tree_sitter_cpp, CUDART_CB/extern-C guards normalized; NOT compilation/type/API checking"
+    }
+  },
+  "observed_synthetic": {
+    "contexts": [
+      "prefill:0:2",
+      "decode:2:1"
+    ],
+    "gpu_units": {
+      "prefill:0:2": 2,
+      "decode:2:1": 2
+    },
+    "blocks": 2,
+    "fitted_thermal": {
+      "k1": 0.009999999999999995,
+      "k2": 0.19999999999999982
+    },
+    "heldout_relative_error": 5.661875563843471e-16,
+    "deployable": false,
+    "constant_temperature_rejection": {
+      "deployable": false,
+      "status": "pending",
+      "reasons": [
+        "Rank deficient/ill-conditioned: voltage/frequency/temperature variation insufficient"
+      ]
+    }
+  },
+  "native_compilation": "NOT RUN: no local Linux/CUDA compiler/runtime",
+  "cuda_execution": "NOT RUN",
+  "vllm_qwen_execution": "NOT RUN",
+  "thor_clock_actuation": "NOT RUN",
+  "physical_pll_timing": "NOT RUN",
+  "real_energy_measurement": "NOT RUN",
+  "paper_experiments_reproduced": false,
+  "earlier_package_preservation": [
+    {
+      "package": "sparsedvfs_thor_qwen35_demo",
+      "archive_sha256": "6bb024e405689d5f924c07bccf450735efc56070d891b351bafcdc6cd893e682",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v2",
+      "archive_sha256": "2ae0333190f3b28dd0511c221831ed2308633ada53b2cbba7277aa9383c3d722",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v3",
+      "archive_sha256": "317e6a6a87a85a3831eb986cc40d96046933f37c9b8bdf54863044cb0cbe20b6",
+      "internal_checksums": "PASS"
+    },
+    {
+      "package": "sparsedvfs_thor_qwen35_demo_v4",
+      "archive_sha256": "497ef2afe9419356552b11d4c576309f21556e5299302218c0a2b69a2dc308b5",
+      "internal_checksums": "PASS"
+    }
+  ],
+  "local_environment_changes": {
+    "installs": false,
+    "model_or_image_downloads": false,
+    "system_services": false,
+    "real_dvfs": false
+  }
+}

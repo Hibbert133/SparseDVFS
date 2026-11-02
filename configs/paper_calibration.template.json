@@ -1,0 +1,13 @@
+{
+  "schema": 4,
+  "synthetic": false,
+  "provenance": null,
+  "scalar_vf_scope": null,
+  "temperature_c": null,
+  "temperature_sensor": null,
+  "temperature_range_c": [null, null],
+  "device_thermal": {"k1": null, "k2": null},
+  "opps": {},
+  "operators": {},
+  "note": "Intentionally undeployable. Use calibrate collect/fit/validate with a real v5 profile, isolated-unit power and provenanced workload inputs. tools/make_v4_calibration_template.py is a retained schema-4 template alias, not a deployment bypass. No author Thor coefficients are available."
+}

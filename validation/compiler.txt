@@ -1,0 +1,11 @@
+cpp/FUSE.cpp: In function 'int fuse_close(void*)':
+cpp/FUSE.cpp:271:5: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  271 |     if(!h)return 0;auto* x=static_cast<Engine*>(h);int result=0;
+      |     ^~
+cpp/FUSE.cpp:271:20: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  271 |     if(!h)return 0;auto* x=static_cast<Engine*>(h);int result=0;
+      |                    ^~~~
+cpp/FUSE.cpp: At global scope:
+cpp/FUSE.cpp:39:3: warning: '{anonymous}::U {anonymous}::number(const std::string&)' defined but not used [-Wunused-function]
+   39 | U number(const std::string& path) { return std::stoull(read(path)); }
+      |   ^~~~~~

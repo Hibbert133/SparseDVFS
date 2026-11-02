@@ -1,0 +1,897 @@
+{
+  "synthetic": true,
+  "deployable": false,
+  "real_vllm": false,
+  "real_cuda": false,
+  "native_fuse": false,
+  "profile_identity_gates_exercised": false,
+  "timing_valid": false,
+  "plan": {
+    "synthetic": true,
+    "deployable": false,
+    "switch_us": 100,
+    "blocks": [
+      {
+        "phase": "prefill",
+        "block_id": 0,
+        "operators": [
+          "embed",
+          "layer.0",
+          "layer.1",
+          "layer.2",
+          "layer.3",
+          "layer.4",
+          "layer.5",
+          "layer.6",
+          "layer.7"
+        ],
+        "triplet": [
+          400000,
+          200000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      },
+      {
+        "phase": "prefill",
+        "block_id": 1,
+        "operators": [
+          "layer.8",
+          "layer.9",
+          "layer.10",
+          "layer.11",
+          "layer.12",
+          "layer.13",
+          "layer.14",
+          "layer.15",
+          "layer.16",
+          "layer.17",
+          "layer.18",
+          "layer.19",
+          "layer.20",
+          "layer.21",
+          "layer.22",
+          "layer.23",
+          "layer.24",
+          "layer.25",
+          "layer.26",
+          "layer.27",
+          "layer.28",
+          "layer.29",
+          "layer.30",
+          "layer.31"
+        ],
+        "triplet": [
+          800000,
+          500000000,
+          2000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      },
+      {
+        "phase": "prefill",
+        "block_id": 2,
+        "operators": [
+          "layer.32",
+          "layer.33",
+          "layer.34",
+          "layer.35",
+          "layer.36",
+          "layer.37",
+          "layer.38",
+          "layer.39",
+          "layer.40",
+          "layer.41",
+          "layer.42",
+          "layer.43",
+          "layer.44",
+          "layer.45",
+          "layer.46",
+          "layer.47",
+          "layer.48",
+          "layer.49",
+          "layer.50",
+          "layer.51",
+          "layer.52",
+          "layer.53",
+          "layer.54",
+          "layer.55",
+          "layer.56",
+          "layer.57",
+          "layer.58",
+          "layer.59",
+          "layer.60",
+          "layer.61",
+          "layer.62",
+          "layer.63"
+        ],
+        "triplet": [
+          1000000,
+          1000000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": false
+      },
+      {
+        "phase": "prefill",
+        "block_id": 3,
+        "operators": [
+          "norm",
+          "logits",
+          "sample"
+        ],
+        "triplet": [
+          400000,
+          200000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      },
+      {
+        "phase": "decode",
+        "block_id": 4,
+        "operators": [
+          "embed",
+          "layer.0",
+          "layer.1",
+          "layer.2",
+          "layer.3",
+          "layer.4",
+          "layer.5",
+          "layer.6",
+          "layer.7"
+        ],
+        "triplet": [
+          400000,
+          200000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      },
+      {
+        "phase": "decode",
+        "block_id": 5,
+        "operators": [
+          "layer.8",
+          "layer.9",
+          "layer.10",
+          "layer.11",
+          "layer.12",
+          "layer.13",
+          "layer.14",
+          "layer.15",
+          "layer.16",
+          "layer.17",
+          "layer.18",
+          "layer.19",
+          "layer.20",
+          "layer.21",
+          "layer.22",
+          "layer.23",
+          "layer.24",
+          "layer.25",
+          "layer.26",
+          "layer.27",
+          "layer.28",
+          "layer.29",
+          "layer.30",
+          "layer.31"
+        ],
+        "triplet": [
+          800000,
+          500000000,
+          2000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      },
+      {
+        "phase": "decode",
+        "block_id": 6,
+        "operators": [
+          "layer.32",
+          "layer.33",
+          "layer.34",
+          "layer.35",
+          "layer.36",
+          "layer.37",
+          "layer.38",
+          "layer.39",
+          "layer.40",
+          "layer.41",
+          "layer.42",
+          "layer.43",
+          "layer.44",
+          "layer.45",
+          "layer.46",
+          "layer.47",
+          "layer.48",
+          "layer.49",
+          "layer.50",
+          "layer.51",
+          "layer.52",
+          "layer.53",
+          "layer.54",
+          "layer.55",
+          "layer.56",
+          "layer.57",
+          "layer.58",
+          "layer.59",
+          "layer.60",
+          "layer.61",
+          "layer.62",
+          "layer.63"
+        ],
+        "triplet": [
+          1000000,
+          1000000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": false
+      },
+      {
+        "phase": "decode",
+        "block_id": 7,
+        "operators": [
+          "norm",
+          "logits",
+          "sample"
+        ],
+        "triplet": [
+          400000,
+          200000000,
+          1000000000
+        ],
+        "estimated_ms": 3,
+        "amortized_strict_gt": true
+      }
+    ]
+  },
+  "events": [
+    {
+      "kind": "cpu",
+      "frequency": 1000000
+    },
+    {
+      "kind": "begin",
+      "ticket": 1,
+      "stream": 42,
+      "phase": "prefill",
+      "block_id": 0,
+      "units": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "layer.2",
+        "layer.3",
+        "layer.4",
+        "layer.5",
+        "layer.6",
+        "layer.7"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": 1,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 1
+    },
+    {
+      "kind": "begin",
+      "ticket": 2,
+      "stream": 42,
+      "phase": "prefill",
+      "block_id": 1,
+      "units": [
+        "layer.8",
+        "layer.9",
+        "layer.10",
+        "layer.11",
+        "layer.12",
+        "layer.13",
+        "layer.14",
+        "layer.15",
+        "layer.16",
+        "layer.17",
+        "layer.18",
+        "layer.19",
+        "layer.20",
+        "layer.21",
+        "layer.22",
+        "layer.23",
+        "layer.24",
+        "layer.25",
+        "layer.26",
+        "layer.27",
+        "layer.28",
+        "layer.29",
+        "layer.30",
+        "layer.31"
+      ],
+      "triplet": [
+        800000,
+        500000000,
+        2000000000
+      ],
+      "next_block": 2,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 2
+    },
+    {
+      "kind": "begin",
+      "ticket": 3,
+      "stream": 42,
+      "phase": "prefill",
+      "block_id": 2,
+      "units": [
+        "layer.32",
+        "layer.33",
+        "layer.34",
+        "layer.35",
+        "layer.36",
+        "layer.37",
+        "layer.38",
+        "layer.39",
+        "layer.40",
+        "layer.41",
+        "layer.42",
+        "layer.43",
+        "layer.44",
+        "layer.45",
+        "layer.46",
+        "layer.47",
+        "layer.48",
+        "layer.49",
+        "layer.50",
+        "layer.51",
+        "layer.52",
+        "layer.53",
+        "layer.54",
+        "layer.55",
+        "layer.56",
+        "layer.57",
+        "layer.58",
+        "layer.59",
+        "layer.60",
+        "layer.61",
+        "layer.62",
+        "layer.63"
+      ],
+      "triplet": [
+        1000000,
+        1000000000,
+        1000000000
+      ],
+      "next_block": 3,
+      "lookahead_eligible": false,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 3
+    },
+    {
+      "kind": "begin",
+      "ticket": 4,
+      "stream": 42,
+      "phase": "prefill",
+      "block_id": 3,
+      "units": [
+        "norm",
+        "logits",
+        "sample"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": null,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 4
+    },
+    {
+      "kind": "cpu",
+      "frequency": 1000000
+    },
+    {
+      "kind": "begin",
+      "ticket": 5,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 4,
+      "units": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "layer.2",
+        "layer.3",
+        "layer.4",
+        "layer.5",
+        "layer.6",
+        "layer.7"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": 5,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 5
+    },
+    {
+      "kind": "begin",
+      "ticket": 6,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 5,
+      "units": [
+        "layer.8",
+        "layer.9",
+        "layer.10",
+        "layer.11",
+        "layer.12",
+        "layer.13",
+        "layer.14",
+        "layer.15",
+        "layer.16",
+        "layer.17",
+        "layer.18",
+        "layer.19",
+        "layer.20",
+        "layer.21",
+        "layer.22",
+        "layer.23",
+        "layer.24",
+        "layer.25",
+        "layer.26",
+        "layer.27",
+        "layer.28",
+        "layer.29",
+        "layer.30",
+        "layer.31"
+      ],
+      "triplet": [
+        800000,
+        500000000,
+        2000000000
+      ],
+      "next_block": 6,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 6
+    },
+    {
+      "kind": "begin",
+      "ticket": 7,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 6,
+      "units": [
+        "layer.32",
+        "layer.33",
+        "layer.34",
+        "layer.35",
+        "layer.36",
+        "layer.37",
+        "layer.38",
+        "layer.39",
+        "layer.40",
+        "layer.41",
+        "layer.42",
+        "layer.43",
+        "layer.44",
+        "layer.45",
+        "layer.46",
+        "layer.47",
+        "layer.48",
+        "layer.49",
+        "layer.50",
+        "layer.51",
+        "layer.52",
+        "layer.53",
+        "layer.54",
+        "layer.55",
+        "layer.56",
+        "layer.57",
+        "layer.58",
+        "layer.59",
+        "layer.60",
+        "layer.61",
+        "layer.62",
+        "layer.63"
+      ],
+      "triplet": [
+        1000000,
+        1000000000,
+        1000000000
+      ],
+      "next_block": 7,
+      "lookahead_eligible": false,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 7
+    },
+    {
+      "kind": "begin",
+      "ticket": 8,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 7,
+      "units": [
+        "norm",
+        "logits",
+        "sample"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": null,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 8
+    },
+    {
+      "kind": "cpu",
+      "frequency": 1000000
+    },
+    {
+      "kind": "begin",
+      "ticket": 9,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 4,
+      "units": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "layer.2",
+        "layer.3",
+        "layer.4",
+        "layer.5",
+        "layer.6",
+        "layer.7"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": 5,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 9
+    },
+    {
+      "kind": "begin",
+      "ticket": 10,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 5,
+      "units": [
+        "layer.8",
+        "layer.9",
+        "layer.10",
+        "layer.11",
+        "layer.12",
+        "layer.13",
+        "layer.14",
+        "layer.15",
+        "layer.16",
+        "layer.17",
+        "layer.18",
+        "layer.19",
+        "layer.20",
+        "layer.21",
+        "layer.22",
+        "layer.23",
+        "layer.24",
+        "layer.25",
+        "layer.26",
+        "layer.27",
+        "layer.28",
+        "layer.29",
+        "layer.30",
+        "layer.31"
+      ],
+      "triplet": [
+        800000,
+        500000000,
+        2000000000
+      ],
+      "next_block": 6,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 10
+    },
+    {
+      "kind": "begin",
+      "ticket": 11,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 6,
+      "units": [
+        "layer.32",
+        "layer.33",
+        "layer.34",
+        "layer.35",
+        "layer.36",
+        "layer.37",
+        "layer.38",
+        "layer.39",
+        "layer.40",
+        "layer.41",
+        "layer.42",
+        "layer.43",
+        "layer.44",
+        "layer.45",
+        "layer.46",
+        "layer.47",
+        "layer.48",
+        "layer.49",
+        "layer.50",
+        "layer.51",
+        "layer.52",
+        "layer.53",
+        "layer.54",
+        "layer.55",
+        "layer.56",
+        "layer.57",
+        "layer.58",
+        "layer.59",
+        "layer.60",
+        "layer.61",
+        "layer.62",
+        "layer.63"
+      ],
+      "triplet": [
+        1000000,
+        1000000000,
+        1000000000
+      ],
+      "next_block": 7,
+      "lookahead_eligible": false,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 11
+    },
+    {
+      "kind": "begin",
+      "ticket": 12,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 7,
+      "units": [
+        "norm",
+        "logits",
+        "sample"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": null,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 12
+    },
+    {
+      "kind": "cpu",
+      "frequency": 1000000
+    },
+    {
+      "kind": "begin",
+      "ticket": 13,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 4,
+      "units": [
+        "embed",
+        "layer.0",
+        "layer.1",
+        "layer.2",
+        "layer.3",
+        "layer.4",
+        "layer.5",
+        "layer.6",
+        "layer.7"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": 5,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 13
+    },
+    {
+      "kind": "begin",
+      "ticket": 14,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 5,
+      "units": [
+        "layer.8",
+        "layer.9",
+        "layer.10",
+        "layer.11",
+        "layer.12",
+        "layer.13",
+        "layer.14",
+        "layer.15",
+        "layer.16",
+        "layer.17",
+        "layer.18",
+        "layer.19",
+        "layer.20",
+        "layer.21",
+        "layer.22",
+        "layer.23",
+        "layer.24",
+        "layer.25",
+        "layer.26",
+        "layer.27",
+        "layer.28",
+        "layer.29",
+        "layer.30",
+        "layer.31"
+      ],
+      "triplet": [
+        800000,
+        500000000,
+        2000000000
+      ],
+      "next_block": 6,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 14
+    },
+    {
+      "kind": "begin",
+      "ticket": 15,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 6,
+      "units": [
+        "layer.32",
+        "layer.33",
+        "layer.34",
+        "layer.35",
+        "layer.36",
+        "layer.37",
+        "layer.38",
+        "layer.39",
+        "layer.40",
+        "layer.41",
+        "layer.42",
+        "layer.43",
+        "layer.44",
+        "layer.45",
+        "layer.46",
+        "layer.47",
+        "layer.48",
+        "layer.49",
+        "layer.50",
+        "layer.51",
+        "layer.52",
+        "layer.53",
+        "layer.54",
+        "layer.55",
+        "layer.56",
+        "layer.57",
+        "layer.58",
+        "layer.59",
+        "layer.60",
+        "layer.61",
+        "layer.62",
+        "layer.63"
+      ],
+      "triplet": [
+        1000000,
+        1000000000,
+        1000000000
+      ],
+      "next_block": 7,
+      "lookahead_eligible": false,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 15
+    },
+    {
+      "kind": "begin",
+      "ticket": 16,
+      "stream": 42,
+      "phase": "decode",
+      "block_id": 7,
+      "units": [
+        "norm",
+        "logits",
+        "sample"
+      ],
+      "triplet": [
+        400000,
+        200000000,
+        1000000000
+      ],
+      "next_block": null,
+      "lookahead_eligible": true,
+      "lead_us": 100
+    },
+    {
+      "kind": "end",
+      "ticket": 16
+    },
+    {
+      "kind": "drain"
+    },
+    {
+      "kind": "drain"
+    }
+  ],
+  "phases": [
+    "prefill",
+    "decode",
+    "decode",
+    "decode"
+  ],
+  "unit_visits": 272,
+  "block_begins": 16,
+  "block_ends": 16
+}

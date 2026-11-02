@@ -1,0 +1,5 @@
+{
+  "backend": "mock",
+  "uuid": "GPU-MOCK",
+  "rates_mhz": [900, 1500, 2100]
+}

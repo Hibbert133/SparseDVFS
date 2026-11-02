@@ -1,0 +1,80 @@
+{
+  "phase": 0,
+  "format": "JSON subset of YAML 1.2",
+  "checked_date": "2026-10-29",
+  "additional_license_check": "2026-10-30",
+  "paper": {
+    "url": "https://arxiv.org/html/2603.21908v1",
+    "author_tree_commit": "c524c51aac552fd16bec5743b1fb95309b46347b",
+    "published_files": [
+      "SparseDVFS.py"
+    ],
+    "author_cpp_available": false
+  },
+  "selected_references": [
+    {
+      "name": "vLLM",
+      "repo": "https://github.com/vllm-project/vllm",
+      "commit": "2a69949bdadf0e8942b7a1619b229cb475beef20",
+      "ref": "v0.19.0",
+      "license": "Apache-2.0",
+      "relevance": "Exact target Worker/profiler and model execution APIs",
+      "adopted": "Profiler config and scoped worker integration; no installed-source patch",
+      "not_adopted": "Other model versions, graph/batching/multi-worker execution",
+      "source": "vllm/config/profiler.py; docs/contributing/profiling.md"
+    },
+    {
+      "name": "PyTorch dispatcher",
+      "repo": "https://github.com/pytorch/pytorch",
+      "commit": "628d01c0180e71462a0f56fc537de9fb9abd0c3f",
+      "license": "BSD-style three-clause terms verified in LICENSE; additional notices present",
+      "relevance": "TorchDispatchMode scoped observation API",
+      "adopted": "Original dispatcher call exactly once, no tensor subclass/replay",
+      "not_adopted": "Main-branch version as a runtime pin; image source/version/hash must be recorded on Thor",
+      "source": "torch/utils/_python_dispatch.py API; LICENSE"
+    },
+    {
+      "name": "Zeus Jetson",
+      "repo": "https://github.com/ml-energy/zeus",
+      "commit": "8886068ae0f2846b602b186c0b484bd97d00ee19",
+      "license": "Apache-2.0",
+      "relevance": "Per-rail discovery and energy-window accounting",
+      "adopted": "Measurement/provenance patterns only",
+      "not_adopted": "Assuming legacy INA paths or mW units apply to Thor hwmon",
+      "source": "zeus/device/soc/jetson.py; LICENSE"
+    },
+    {
+      "name": "jetson-stats",
+      "repo": "https://github.com/rbonghi/jetson_stats",
+      "commit": "cb030ddae0b87becd10e7b62c33bdf210aae84ba",
+      "license": "Repository AGPL-3.0; individual provider file GPL-3.0-or-later headers observed; no code copied",
+      "relevance": "Thor VIN/module rail distinction and platform-specific controls",
+      "adopted": "Source comparison and optional pre-existing jtop client interface",
+      "not_adopted": "Copying AGPL/GPL source or automatically installing/restarting a service",
+      "source": "jtop/core/power.py; thor_power.py; jetsonpower_provider.py; LICENSE"
+    },
+    {
+      "name": "PELM",
+      "repo": "https://github.com/imec-nu/PELM",
+      "commit": "1c23267ac23948abbd057f9b8116feafb3e7b266",
+      "license": "No license file observed in inspected complete tree; reference links only",
+      "relevance": "Jetson LLM frequency/node adaptation pitfalls",
+      "adopted": "Interface comparison only; no copied implementation",
+      "not_adopted": "Speculative decoding, early exits, DQN, fan/PWM/nvpmodel edits, privileged whole-/sys mount",
+      "source": "README.md; utils/Manager.py"
+    }
+  ],
+  "citation_search": {
+    "FUSE": "https://arxiv.org/html/2507.02135v1#S6",
+    "E4": "https://arxiv.org/abs/2503.04865",
+    "DVFO": "https://arxiv.org/abs/2306.01811"
+  },
+  "evaluation": "Exact target API relevance, implementation completeness, tests and license were checked; star counts are not an adoption criterion",
+  "copying": "No newly inspected third-party source copied; user-selected SparseDVFS equations take precedence",
+  "self_check": {
+    "paper_precedence": true,
+    "licenses_recorded": true,
+    "reference_differences_recorded": true,
+    "no_environment_install": true
+  }
+}

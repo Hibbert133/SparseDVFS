@@ -1,0 +1,9 @@
+FROM vllm/vllm-openai@sha256:7a0f0fdd2771464b6976625c2b2d5dd46f566aa00fbc53eceab86ef50883da90
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends g++ cmake && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/sparsedvfs
+COPY . .
+RUN cmake -S . -B build -DFUSE_WITH_CUDA=ON && cmake --build build -j2
+ENV PYTHONPATH=/opt/sparsedvfs PYTHONDONTWRITEBYTECODE=1 VLLM_USE_V2_MODEL_RUNNER=0 SPARSEDVFS_APPLY=0
+ENTRYPOINT ["python3", "-B", "-m", "rtx5090.run"]
+CMD ["--help"]

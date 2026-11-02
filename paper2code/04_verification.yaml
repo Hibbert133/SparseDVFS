@@ -1,0 +1,32 @@
+{
+  "phase": 4,
+  "format": "JSON subset of YAML 1.2",
+  "date": "2026-10-30",
+  "generated": true,
+  "static_checked": true,
+  "synthetic_executed": true,
+  "unit_tests": {
+    "total": 143,
+    "passed": 134,
+    "skipped": 9,
+    "failures": 0,
+    "errors": 0
+  },
+  "synthetic_outputs": [
+    "examples/v5_synthetic_result.json",
+    "examples/v5_dense_paper_core.json",
+    "examples/v5_effective_sparse_paper_core.json"
+  ],
+  "native_compilation": "NOT RUN",
+  "cuda_execution": "NOT RUN",
+  "vllm_qwen_execution": "NOT RUN",
+  "real_frequency_writes": "NOT RUN",
+  "real_energy_measurement": "NOT RUN",
+  "paper_experiments_reproduced": false,
+  "self_check": {
+    "equations_and_algorithm_retained": true,
+    "unknown_data_pending": true,
+    "assumptions_recorded": true,
+    "unavailable_runtime_not_claimed": true
+  }
+}

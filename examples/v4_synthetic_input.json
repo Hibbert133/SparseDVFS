@@ -1,0 +1,397 @@
+{
+  "profile": {
+    "schema": 4,
+    "synthetic": true,
+    "dvfs_applied": false,
+    "identity": {
+      "backend": "synthetic_paper_core_v4"
+    },
+    "units": [
+      "matmul_a",
+      "vector_work",
+      "matmul_b",
+      "short_tail"
+    ],
+    "reference": [
+      2000000,
+      1000000000,
+      2000000000
+    ],
+    "candidates": [
+      {
+        "triplet": [
+          1000000,
+          500000000,
+          1000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          1000000,
+          500000000,
+          2000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          1000000,
+          1000000000,
+          1000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          1000000,
+          1000000000,
+          2000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          2000000,
+          500000000,
+          1000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          2000000,
+          500000000,
+          2000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          2000000,
+          1000000000,
+          1000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      },
+      {
+        "triplet": [
+          2000000,
+          1000000000,
+          2000000000
+        ],
+        "operators": [
+          {
+            "phase": "synthetic",
+            "name": "matmul_a"
+          },
+          {
+            "phase": "synthetic",
+            "name": "vector_work"
+          },
+          {
+            "phase": "synthetic",
+            "name": "matmul_b"
+          },
+          {
+            "phase": "synthetic",
+            "name": "short_tail"
+          }
+        ]
+      }
+    ]
+  },
+  "calibration": {
+    "schema": 4,
+    "synthetic": true,
+    "provenance": "Invented fixture values, not measurements or author parameters",
+    "scalar_vf_scope": "SYNTHETIC triplet-to-scalar mapping; no physical voltage rail is represented",
+    "temperature_c": 50.0,
+    "temperature_range_c": [
+      20.0,
+      80.0
+    ],
+    "temperature_sensor": "virtual_junction",
+    "device_thermal": {
+      "k1": 0.01,
+      "k2": 0.1
+    },
+    "opps": {
+      "1000000,500000000,1000000000": {
+        "peak_flops": 900000000.0,
+        "bandwidth_Bps": 500000000.0,
+        "voltage_v": 0.7,
+        "effective_frequency_hz": 2500000000
+      },
+      "1000000,500000000,2000000000": {
+        "peak_flops": 900000000.0,
+        "bandwidth_Bps": 2000000000.0,
+        "voltage_v": 0.75,
+        "effective_frequency_hz": 3500000000
+      },
+      "1000000,1000000000,1000000000": {
+        "peak_flops": 3600000000.0,
+        "bandwidth_Bps": 500000000.0,
+        "voltage_v": 0.7999999999999999,
+        "effective_frequency_hz": 3000000000
+      },
+      "1000000,1000000000,2000000000": {
+        "peak_flops": 3600000000.0,
+        "bandwidth_Bps": 2000000000.0,
+        "voltage_v": 0.85,
+        "effective_frequency_hz": 4000000000
+      },
+      "2000000,500000000,1000000000": {
+        "peak_flops": 1000000000.0,
+        "bandwidth_Bps": 500000000.0,
+        "voltage_v": 0.75,
+        "effective_frequency_hz": 3500000000
+      },
+      "2000000,500000000,2000000000": {
+        "peak_flops": 1000000000.0,
+        "bandwidth_Bps": 2000000000.0,
+        "voltage_v": 0.8,
+        "effective_frequency_hz": 4500000000
+      },
+      "2000000,1000000000,1000000000": {
+        "peak_flops": 4000000000.0,
+        "bandwidth_Bps": 500000000.0,
+        "voltage_v": 0.85,
+        "effective_frequency_hz": 4000000000
+      },
+      "2000000,1000000000,2000000000": {
+        "peak_flops": 4000000000.0,
+        "bandwidth_Bps": 2000000000.0,
+        "voltage_v": 0.9,
+        "effective_frequency_hz": 5000000000
+      }
+    },
+    "operators": {
+      "synthetic/matmul_a": {
+        "work_flop": 8000000.0,
+        "data_byte": 532000,
+        "s_comp": 0.0,
+        "s_mem": 0.0,
+        "overhead_s": 0.0,
+        "effective_sparsity_verified": false,
+        "effective_sparsity_evidence": null,
+        "activity_factor": 2e-09,
+        "activity_s_comp": 0.0,
+        "workload_provenance": "SYNTHETIC descriptor; no arrays allocated"
+      },
+      "synthetic/vector_work": {
+        "work_flop": 8000000.0,
+        "data_byte": 16000000.0,
+        "s_comp": 0.75,
+        "s_mem": 0.0,
+        "overhead_s": 0.0,
+        "effective_sparsity_verified": true,
+        "effective_sparsity_evidence": "SYNTHETIC contract only; no actual sparse kernel",
+        "activity_factor": 7e-10,
+        "activity_s_comp": 0.75,
+        "workload_provenance": "SYNTHETIC descriptor; no arrays allocated"
+      },
+      "synthetic/matmul_b": {
+        "work_flop": 8000000.0,
+        "data_byte": 532000,
+        "s_comp": 0.0,
+        "s_mem": 0.0,
+        "overhead_s": 0.0,
+        "effective_sparsity_verified": false,
+        "effective_sparsity_evidence": null,
+        "activity_factor": 2e-09,
+        "activity_s_comp": 0.0,
+        "workload_provenance": "SYNTHETIC descriptor; no arrays allocated"
+      },
+      "synthetic/short_tail": {
+        "work_flop": 512,
+        "data_byte": 512,
+        "s_comp": 0.0,
+        "s_mem": 0.0,
+        "overhead_s": 2e-05,
+        "effective_sparsity_verified": false,
+        "effective_sparsity_evidence": null,
+        "activity_factor": 2e-10,
+        "activity_s_comp": 0.0,
+        "workload_provenance": "SYNTHETIC descriptor; no arrays allocated"
+      }
+    }
+  },
+  "graph": {
+    "nodes": [
+      "matmul_a",
+      "vector_work",
+      "matmul_b",
+      "short_tail"
+    ],
+    "edges": [
+      [
+        "matmul_a",
+        "vector_work"
+      ],
+      [
+        "vector_work",
+        "matmul_b"
+      ],
+      [
+        "matmul_b",
+        "short_tail"
+      ]
+    ]
+  },
+  "shapes": {
+    "matmul_a": {
+      "lhs": [
+        16,
+        500
+      ],
+      "rhs": [
+        500,
+        500
+      ],
+      "output": [
+        16,
+        500
+      ],
+      "flop_convention": "2*M*K*N",
+      "dtype": "synthetic_BF16"
+    },
+    "vector_work": {
+      "input": [
+        4000000
+      ],
+      "output": [
+        4000000
+      ],
+      "traffic": "synthetic read/write traffic; no data allocation"
+    },
+    "matmul_b": "same descriptors as matmul_a",
+    "short_tail": {
+      "input": [
+        128
+      ],
+      "output": [
+        128
+      ]
+    }
+  }
+}

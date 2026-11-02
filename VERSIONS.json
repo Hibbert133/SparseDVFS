@@ -1,0 +1,139 @@
+{
+  "demo_version": 5,
+  "target": "Jetson T5000 / 128GB / R38.2",
+  "model": {
+    "id": "Qwen/Qwen3.5-27B",
+    "revision": "fc05daec18b0a78c049392ed2e771dde82bdf654",
+    "dtype": "bfloat16",
+    "dense": true,
+    "text_only": true,
+    "config_url": "https://huggingface.co/Qwen/Qwen3.5-27B/raw/fc05daec18b0a78c049392ed2e771dde82bdf654/config.json",
+    "config_sha256": "f8d190c5b89c1521220f935d2567a587d6e291ed69066a45a106560b05a2174c",
+    "layers": 64,
+    "linear_attention_layers": 48,
+    "full_attention_layers": 16,
+    "weights_downloaded_on_current_host": false
+  },
+  "image": {
+    "reference": "ghcr.io/nvidia-ai-iot/vllm@sha256:b587dd56b4cb076209ad5156a626ac75f5a976d0e8e7d1e6a9fccd56d1bd65e8",
+    "descriptive_tag": "ghcr.io/nvidia-ai-iot/vllm:0.19.0-r38.2.arm64-sbsa-cu130-24.04",
+    "digest": "sha256:b587dd56b4cb076209ad5156a626ac75f5a976d0e8e7d1e6a9fccd56d1bd65e8",
+    "source": "https://github.com/orgs/nvidia-ai-iot/packages/container/package/vllm",
+    "pulled_on_current_host": false,
+    "target_runtime_versions": "runs/container_runtime.json"
+  },
+  "vllm": {
+    "version": "0.19.0",
+    "reviewed_ref": "v0.19.0",
+    "worker": "sparsedvfs_vllm.worker.SparseDVFSWorker",
+    "protocol": "v5_vllm019_dual_granularity_single_request_main_stream",
+    "VLLM_USE_V2_MODEL_RUNNER": "0",
+    "modifies_installed_vllm": false,
+    "target_execution_in_this_task": false
+  },
+  "runtime": {
+    "tp": 1,
+    "pp": 1,
+    "dp": 1,
+    "max_num_seqs": 1,
+    "max_model_len": 4096,
+    "max_num_batched_tokens": 4096,
+    "gpu_memory_utilization": 0.7,
+    "eager": true,
+    "prefix_caching": false,
+    "chunked_prefill": false,
+    "async_scheduling": false,
+    "speculative_decoding": false,
+    "normal_kv_mamba_cache": true,
+    "seed": 0,
+    "greedy": true,
+    "input_tokens": 512,
+    "output_tokens": 128,
+    "warmups": 2
+  },
+  "reviewed_sources": [
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/v1/worker/gpu_worker.py",
+      "sha256_of_reviewed_utf8_snapshot": "03cd947f80993f3ddaa852cafe8773a25228810e192d17977b0863f895c9e5fa",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/v1/worker/gpu_model_runner.py",
+      "sha256_of_reviewed_utf8_snapshot": "78bb86e5ccd1ed8f384fcf83540c86a242330d53d7fa22215884d63b1f27c36f",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/model_executor/models/qwen3_5.py",
+      "sha256_of_reviewed_utf8_snapshot": "c9a34d63490af82648c17267ebd43b7c04f7b610e806115dac614052ee86e2c8",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/model_executor/models/qwen3_next.py",
+      "sha256_of_reviewed_utf8_snapshot": "4dbfa7948d45877b39bce9097cb505a4bfcbf481460d501b812b2f08d558932b",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/v1/core/sched/output.py",
+      "sha256_of_reviewed_utf8_snapshot": "60dc762d719c6ec91884ea9a40d16f038ac58c3b728c74d28e57052ee20a39de",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/engine/arg_utils.py",
+      "sha256_of_reviewed_utf8_snapshot": "79fc584f58812e386dd68dac5938be1a51c9c49d5e4f2dda92c9b9b1eaa92315",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/entrypoints/llm.py",
+      "sha256_of_reviewed_utf8_snapshot": "68f573207aeb3f655c20b5e9d2035740cac99f68d3f11bec824e462e177b9eb7",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/entrypoints/openai/completion/protocol.py",
+      "sha256_of_reviewed_utf8_snapshot": "d529d72221c54beb3b2ddd54aa431b6bb6f9c7f0553db57768d8a1bf5f8d9b20",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    },
+    {
+      "url": "https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/entrypoints/openai/completion/serving.py",
+      "sha256_of_reviewed_utf8_snapshot": "ffb08a4e5113ed2bf2f23b5389f4f01f1b3393a7b3a5028e26e4c91ce3831bc5",
+      "note": "Review evidence only, not a claim of the image file hash; target runtime records its own hashes"
+    }
+  ],
+  "audited_date": "2026-10-30",
+  "native_reference_abi": 5,
+  "calibration_schema": 4,
+  "current_machine_runtime": "Python standard library only; no Thor/CUDA/vLLM",
+  "paper2code_skill": {
+    "path": "C:/Users/Administrator/.codex/skills/paper2code/SKILL.md",
+    "sha256": "6e3e803967e11bdff0542838d7f7f5ca44818f1bf6e2b1a241f5918b83d8d094",
+    "claim": "Fresh local skill read; no assertion of newest upstream release",
+    "applied_scope": "Core plus synthetic demo; no environment installation or experiments"
+  },
+  "core_demo": {
+    "python": ">=3.10",
+    "packages": [],
+    "entrypoints": [
+      "v5_demo.py",
+      "paper_demo.py"
+    ],
+    "synthetic_only": true,
+    "no_device_results": true
+  },
+  "profile_plan_schema": 5,
+  "granularities": [
+    "module",
+    "operator"
+  ],
+  "operator_evidence": {
+    "requests_after_warmup": 3,
+    "per_opp_diagnostics": true,
+    "benchmark_diagnostic_profiler": false,
+    "unknown_or_auxiliary_work": "reject observed incompatibility"
+  },
+  "switch_repetitions_per_direction": 10,
+  "skill": {
+    "path": "C:/Users/Administrator/.codex/skills/paper2code/SKILL.md",
+    "sha256": "6e3e803967e11bdff0542838d7f7f5ca44818f1bf6e2b1a241f5918b83d8d094",
+    "claim": "Current local adapted installation read; not an automatic upstream upgrade"
+  },
+  "implementation_date_client_timezone": "2026-10-30 Asia/Shanghai"
+}

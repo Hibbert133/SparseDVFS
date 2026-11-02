@@ -1,0 +1,6 @@
+{
+  "backend": "nvml",
+  "uuid": "GPU-REPLACE-WITH-TARGET-UUID",
+  "default_auto_ack": true,
+  "rates_mhz": [900, 1500, 2100]
+}

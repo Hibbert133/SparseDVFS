@@ -1,0 +1,7 @@
+{
+  "device_model": "COPY EXACT device_model FROM runs/hardware_host.json OR doctor.json",
+  "jetson_release": "COPY EXACT jetson_release FROM runs/hardware_host.json OR doctor.json",
+  "rates_hz": [],
+  "verified_discrete_opps": false,
+  "source": "Fill the real board/BSP-specific source and verification record. Do not infer OPPs by interpolation."
+}

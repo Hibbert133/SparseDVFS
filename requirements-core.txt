@@ -1,0 +1,5 @@
+# Core synthetic demo: Python >=3.10 standard library only.
+# No pip packages, torch, CUDA, vLLM, datasets or model weights are required.
+# The optional C++ structural parser was already available; a YAML parser was
+# not available in the inspected runtimes. Neither is needed by paper_demo.py.
+# No parser or runtime dependency was installed for this task.

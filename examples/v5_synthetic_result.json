@@ -1,0 +1,196 @@
+{
+  "synthetic": true,
+  "deployable": false,
+  "tensors_allocated": false,
+  "certificate_contexts": [
+    "prefill:0:2",
+    "decode:2:1"
+  ],
+  "gpu_units": {
+    "prefill:0:2": 2,
+    "decode:2:1": 2
+  },
+  "atomic_fused_units": true,
+  "blocks": [
+    {
+      "phase": "prefill:0:2",
+      "operators": [
+        "layer.0::aten.mm.default#0",
+        "layer.0::_C.fused_norm.default#1"
+      ],
+      "triplet": [
+        1000,
+        2000000000,
+        1000000000
+      ],
+      "estimated_ms": 1.1500000000000001,
+      "amortized_strict_gt": true,
+      "block_id": 0
+    },
+    {
+      "phase": "decode:2:1",
+      "operators": [
+        "layer.0::aten.mm.default#0",
+        "layer.0::_C.fused_norm.default#1"
+      ],
+      "triplet": [
+        1000,
+        2000000000,
+        2000000000
+      ],
+      "estimated_ms": 0.7666666666666668,
+      "amortized_strict_gt": true,
+      "block_id": 1
+    }
+  ],
+  "fitted_thermal": {
+    "k1": 0.009999999999999995,
+    "k2": 0.19999999999999982
+  },
+  "heldout_error": 5.661875563843471e-16,
+  "validation": {
+    "deployable": false,
+    "status": "pending",
+    "max_relative_error": 5.661875563843471e-16,
+    "acceptance_relative_error": 0.001,
+    "records": [
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.0975307474497569e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.5488602464078636e-16,
+        "power_relative_error": 3.474332732358493e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.5488602464078636e-16,
+        "power_relative_error": 4.351256220361186e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.0156554550202549e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.5488602464078636e-16,
+        "power_relative_error": 4.446450161202129e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.5488602464078636e-16,
+        "power_relative_error": 4.1812372643824745e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 0.0
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.695452094625733e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 3.8589608085684975e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 1.2632679349435699e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 3.87005847363889e-16
+      },
+      {
+        "unit": "prefill:0:2/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.4648343778101936e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 3.850261919976266e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 0.0
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.4784575079347786e-16,
+        "power_relative_error": 1.8261748904106527e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 1.839792898541977e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 0.0
+      },
+      {
+        "unit": "decode:2:1/layer.0::aten.mm.default#0",
+        "latency_relative_error": 1.4784575079347786e-16,
+        "power_relative_error": 1.7474883321530812e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 1.2046690805394493e-16,
+        "power_relative_error": 3.0303948265042314e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.935787329400318e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 1.3552527156068805e-16,
+        "power_relative_error": 5.661875563843471e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 1.2046690805394493e-16,
+        "power_relative_error": 1.4465917777454072e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 0.0,
+        "power_relative_error": 2.8051430547181215e-16
+      },
+      {
+        "unit": "decode:2:1/layer.0::_C.fused_norm.default#1",
+        "latency_relative_error": 1.3552527156068805e-16,
+        "power_relative_error": 4.060677343260044e-16
+      }
+    ],
+    "reasons": [
+      "Synthetic calibration is never deployable"
+    ],
+    "train_records": 72,
+    "heldout_records": 24,
+    "rank": 6,
+    "qr_relative_rank_tolerance": 1e-10,
+    "synthetic": true
+  },
+  "constant_temperature_rejection": {
+    "deployable": false,
+    "status": "pending",
+    "reasons": [
+      "Rank deficient/ill-conditioned: voltage/frequency/temperature variation insufficient"
+    ]
+  },
+  "hardware_energy_or_savings": null,
+  "paper_experiments_reproduced": false
+}

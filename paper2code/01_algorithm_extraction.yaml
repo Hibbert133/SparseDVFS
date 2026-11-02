@@ -1,0 +1,66 @@
+phase: 1
+paper: 'https://arxiv.org/html/2603.21908v1'
+algorithm_count: 1
+equations:
+  - id: 'Eq. (1), section 4.1.1'
+    expression: 'T_exe(f) = max(W_comp*(1-S_comp)/P_peak(f_cpu,f_gpu), D_mem*(1-S_mem)/B_mem(f_mem)) + T_overhead'
+    units: {W_comp: FLOP, D_mem: byte, P_peak: FLOP/s, B_mem: byte/s, T_exe: s, T_overhead: s}
+    constraints: ['0 <= S_comp <= 1', '0 <= S_mem <= 1', 'P_peak > 0', 'B_mem > 0']
+    meanings:
+      S_comp: 'Effective computation actually skipped by hardware/kernel; not raw activation zero fraction.'
+      S_mem: 'Actual traffic reduction from supported sparse storage/access; unstructured zero values alone do not establish savings.'
+      P_peak: 'Function of CPU/GPU frequencies; measured compute capacity is not an arbitrary function of EMC.'
+      B_mem: 'Function of EMC frequency; bandwidth is not an arbitrary function of CPU/GPU in this equation.'
+  - id: 'Eq. (2), section 4.1.2'
+    expression: 'P_total(f,T) = alpha(S_comp)*V^2*f + (k1*T+k2)*V'
+    units: {V: volt, f: Hz, T: degree_C, P_total: W}
+    constraints:
+      - 'alpha is a calibrated sparsity-dependent activity factor, not an independent free value at every OPP.'
+      - 'k1 and k2 are device-specific thermal constants.'
+    unresolved: 'The mapping from a CPU/GPU/EMC triplet to scalar V and f, and the form of alpha(S_comp), are not specified.'
+  - id: 'Eq. (3), section 4.2.2'
+    expression: 'T_block > N*T_switch'
+    conflict: 'Algorithm 1 uses a strict less-than merge test and appends the final block unconditionally; equality and a short tail need explicit reporting.'
+algorithm_1:
+  name: 'Sparse-Aware Greedy Graph Partitioning'
+  source: 'Section 4.2.1, Algorithm 1 lines 1-17'
+  inputs: ['nonempty DAG in a supplied topological order', 'offline models', 'T_switch', 'N']
+  outputs: 'Ordered pairs of a block and its frequency vector.'
+  operational_spec:
+    initialization_lines_1: 'Start the current block with the first vertex and its predicted frequency.'
+    loop_lines_2_5: 'For each following vertex, obtain its frequency and predict the current block duration at its current vector.'
+    merge_lines_7_9: 'Merge if current duration < N*T_switch OR candidate frequency is approximately equal; update each vector component to the maximum.'
+    split_lines_10_13: 'Otherwise append current block and start a singleton with the next vertex.'
+    finish_lines_16_17: 'Append the last block and return the sequence.'
+  unspecified: ['frequency approximation metric/tolerance', 'frequency-selection objective and explicit latency budget', 'calc_time composition for a block/DAG']
+co_governor:
+  section_4_3_1: 'Raise CPU for preprocessing/kernel submission; allow it to drop after offload.'
+  section_4_3_2:
+    sparse: 'High EMC and reduced GPU for sparse memory-bound work.'
+    dense: 'Minimum EMC sufficient for selected compute throughput.'
+    unspecified: ['sparse/dense threshold', 'dense but memory-bound case', 'quantitative bandwidth margin']
+  section_4_3_3: 'Submit next-block frequency instructions before the current block finishes through a pipelined command queue.'
+  missing_implementation: ['hardware register/command format', 'delayed versus immediate application semantics', 'queue/event synchronization protocol', 'look-ahead lead time']
+paper_settings:
+  N: {value: 5, source: 'Figure 9 and Table 2 examples; tunable, not a universal constant'}
+  platform: {value: 'Orin Nano 8GB, JetPack 6.0, Linux 5.15, PyTorch 2.1', source: 'Section 5'}
+  workloads: {value: ['ResNet-18', 'ResNet-101', 'ViT-B16', 'ViT-L16'], source: 'Section 6.1 / Table 3'}
+  training: 'No new network training method is specified; this is inference/DVFS middleware.'
+target_shapes:
+  provenance: 'Existing user-selected Qwen3.5-27B configuration, not the SparseDVFS paper.'
+  prefill_hidden: '[512, 5120] under the initial text-only flattened workload'
+  decode_hidden: '[1, 5120] per decode step'
+  model_layers: '64: 48 linear attention, 16 full attention'
+  plan_units: 'module: embed + 64 decoder modules + norm + logits + sample = 68 intervals; v5 operator: observed dispatcher leaves/atomic fused units, separate scheduler contexts'
+  caveat: 'Padding/internal layout and fused kernel shapes require actual vLLM execution to confirm; these are not a recovered kernel DAG.'
+missing_but_critical:
+  - 'Real Thor OPP/V/f, compute/bandwidth, switch timing and thermal/activity calibration.'
+  - 'Author C++ FUSE and exact CUDA/TensorRT interception code.'
+  - 'Observed dispatcher/fused units are not a recovered complete kernel DAG; actual Qwen coverage and sparsity mechanisms require device evidence.'
+  - 'Figure/table reproduction requires the original models/data/platform; not available here.'
+self_check:
+  all_numbered_design_equations_extracted: true
+  algorithm_box_control_flow_extracted: true
+  co_governor_rules_and_missing_protocol_recorded: true
+  shapes_separated_from_paper_specification: true
+  no_author_parameters_invented: true

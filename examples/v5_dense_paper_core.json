@@ -1,0 +1,497 @@
+{
+  "schema": 4,
+  "synthetic": true,
+  "deployable": false,
+  "evidence": {
+    "equations": "executed with synthetic scalar inputs",
+    "partition": "executed with supplied descriptor graph",
+    "governor": "executed with virtual host time and supplied event readiness",
+    "hardware": "NOT EXECUTED",
+    "paper_results": "NOT REPRODUCED"
+  },
+  "parameters": {
+    "max_slowdown": 0.05,
+    "similarity_tolerance": 0.05,
+    "switch_us": 100.0,
+    "N": 5
+  },
+  "assumptions": [
+    "Input coefficients/OPPs/temperature/activity are invented fixtures.",
+    "Slowdown/tolerance/lead and scalar V/f mapping are demo choices, not reported paper parameters.",
+    "Block time is a serialized sum; arbitrary parallel DAG timing is not inferred.",
+    "Dense-memory coordination falls back to an explicitly proposed budgeted selector.",
+    "Virtual end-pending is not physical PLL overlap or measured energy."
+  ],
+  "shapes": {
+    "matmul_a": {
+      "lhs": [
+        16,
+        500
+      ],
+      "rhs": [
+        500,
+        500
+      ],
+      "output": [
+        16,
+        500
+      ],
+      "flop_convention": "2*M*K*N",
+      "dtype": "synthetic_BF16"
+    },
+    "vector_work": {
+      "input": [
+        4000000
+      ],
+      "output": [
+        4000000
+      ],
+      "traffic": "synthetic read/write traffic; no data allocation"
+    },
+    "matmul_b": "same descriptors as matmul_a",
+    "short_tail": {
+      "input": [
+        128
+      ],
+      "output": [
+        128
+      ]
+    }
+  },
+  "operator_choices": [
+    {
+      "triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "latency_s": 0.002,
+      "model_energy_j": 0.012580000000000001,
+      "policy": "minimum_model_energy_under_user_budget",
+      "measured": false,
+      "name": "matmul_a",
+      "resource_class": "compute_bound",
+      "coordination_rule": "minimum_emc_with_memory_time_not_above_compute_time",
+      "effective_s_comp": 0.0,
+      "effective_s_mem": 0.0
+    },
+    {
+      "triplet": [
+        2000000,
+        500000000,
+        2000000000
+      ],
+      "latency_s": 0.008,
+      "model_energy_j": 0.019968000000000003,
+      "policy": "minimum_model_energy_under_user_budget",
+      "measured": false,
+      "name": "vector_work",
+      "resource_class": "dense_memory_bound",
+      "coordination_rule": "PROPOSED_dense_memory_fallback_energy_under_user_budget",
+      "effective_s_comp": 0.0,
+      "effective_s_mem": 0.0
+    },
+    {
+      "triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "latency_s": 0.002,
+      "model_energy_j": 0.012580000000000001,
+      "policy": "minimum_model_energy_under_user_budget",
+      "measured": false,
+      "name": "matmul_b",
+      "resource_class": "compute_bound",
+      "coordination_rule": "minimum_emc_with_memory_time_not_above_compute_time",
+      "effective_s_comp": 0.0,
+      "effective_s_mem": 0.0
+    },
+    {
+      "triplet": [
+        1000000,
+        500000000,
+        1000000000
+      ],
+      "latency_s": 2.1024e-05,
+      "model_energy_j": 1.3980960000000001e-05,
+      "policy": "minimum_model_energy_under_user_budget",
+      "measured": false,
+      "name": "short_tail",
+      "resource_class": "dense_memory_bound",
+      "coordination_rule": "PROPOSED_dense_memory_fallback_energy_under_user_budget",
+      "effective_s_comp": 0.0,
+      "effective_s_mem": 0.0
+    }
+  ],
+  "blocks": [
+    {
+      "block_id": 0,
+      "operators": [
+        "matmul_a"
+      ],
+      "triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "estimated_ms": 2.0,
+      "amortized_strict_gt": true
+    },
+    {
+      "block_id": 1,
+      "operators": [
+        "vector_work"
+      ],
+      "triplet": [
+        2000000,
+        500000000,
+        2000000000
+      ],
+      "estimated_ms": 8.0,
+      "amortized_strict_gt": true
+    },
+    {
+      "block_id": 2,
+      "operators": [
+        "matmul_b"
+      ],
+      "triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "estimated_ms": 2.0,
+      "amortized_strict_gt": true
+    },
+    {
+      "block_id": 3,
+      "operators": [
+        "short_tail"
+      ],
+      "triplet": [
+        1000000,
+        500000000,
+        1000000000
+      ],
+      "estimated_ms": 0.021024,
+      "amortized_strict_gt": false
+    }
+  ],
+  "partition_decisions": [
+    {
+      "current": [
+        "matmul_a"
+      ],
+      "next": "vector_work",
+      "current_triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "next_triplet": [
+        2000000,
+        500000000,
+        2000000000
+      ],
+      "current_duration_s": 0.002,
+      "threshold_s": 0.0005,
+      "short": false,
+      "similar": false,
+      "merged": false
+    },
+    {
+      "current": [
+        "vector_work"
+      ],
+      "next": "matmul_b",
+      "current_triplet": [
+        2000000,
+        500000000,
+        2000000000
+      ],
+      "next_triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "current_duration_s": 0.008,
+      "threshold_s": 0.0005,
+      "short": false,
+      "similar": false,
+      "merged": false
+    },
+    {
+      "current": [
+        "matmul_b"
+      ],
+      "next": "short_tail",
+      "current_triplet": [
+        2000000,
+        1000000000,
+        1000000000
+      ],
+      "next_triplet": [
+        1000000,
+        500000000,
+        1000000000
+      ],
+      "current_duration_s": 0.002,
+      "threshold_s": 0.0005,
+      "short": false,
+      "similar": false,
+      "merged": false
+    }
+  ],
+  "virtual_events": [
+    {
+      "kind": "cpu_submission_boost",
+      "host_ns": 0,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "gpu_stream_boundary",
+      "host_ns": 1000,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_start_observed",
+      "host_ns": 2000,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ],
+      "due_ns": 1902000
+    },
+    {
+      "kind": "cpu_submission_release",
+      "host_ns": 3000,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "lookahead_written_end_pending",
+      "host_ns": 1902000,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "gpu_end_observed",
+      "host_ns": 2004000,
+      "ticket": 1,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "cpu_submission_boost",
+      "host_ns": 2005000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "gpu_stream_boundary",
+      "host_ns": 2006000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "gpu_start_observed",
+      "host_ns": 2007000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ],
+      "due_ns": 9907000
+    },
+    {
+      "kind": "cpu_submission_release",
+      "host_ns": 2008000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        2000000000
+      ]
+    },
+    {
+      "kind": "lookahead_written_end_pending",
+      "host_ns": 9907000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_end_observed",
+      "host_ns": 10009000,
+      "ticket": 2,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "cpu_submission_boost",
+      "host_ns": 10010000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_stream_boundary",
+      "host_ns": 10011000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_start_observed",
+      "host_ns": 10012000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ],
+      "due_ns": 11912000
+    },
+    {
+      "kind": "cpu_submission_release",
+      "host_ns": 10013000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "lookahead_written_end_pending",
+      "host_ns": 11912000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_end_observed",
+      "host_ns": 12014000,
+      "ticket": 3,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "cpu_submission_boost",
+      "host_ns": 12015000,
+      "ticket": 4,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_stream_boundary",
+      "host_ns": 12016000,
+      "ticket": 4,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_start_observed",
+      "host_ns": 12017000,
+      "ticket": 4,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ],
+      "due_ns": 12017000
+    },
+    {
+      "kind": "cpu_submission_release",
+      "host_ns": 12018000,
+      "ticket": 4,
+      "cpu_requested_khz": 1000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "gpu_end_observed",
+      "host_ns": 12040024,
+      "ticket": 4,
+      "cpu_requested_khz": 1000000,
+      "gpu_emc_requested": [
+        500000000,
+        1000000000
+      ]
+    },
+    {
+      "kind": "virtual_snapshot_restored",
+      "host_ns": 12041024,
+      "ticket": null,
+      "cpu_requested_khz": 2000000,
+      "gpu_emc_requested": [
+        1000000000,
+        2000000000
+      ]
+    }
+  ],
+  "virtual_restore": {
+    "closed": true,
+    "actual_hardware_restored": false,
+    "source": "virtual reference state only"
+  }
+}
