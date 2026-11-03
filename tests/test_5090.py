@@ -22,7 +22,7 @@ GPU=dict(backend='mock',rates_mhz=[900,1500,2100],uuid='GPU-MOCK')
 
 class ProtocolTests(unittest.TestCase):
     def test_idle_memory_state_does_not_remove_high_clock_candidates(self):
-        device=NVML.__new__(NVML); device.uuid='GPU-TEST'
+        device=NVML.__new__(NVML); device.uuid='GPU-TEST'; device.handle=None
         device._call=lambda *args:None
         device.read=lambda:2527
         def listing(name,*args):
