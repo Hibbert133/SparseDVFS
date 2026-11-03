@@ -66,3 +66,5 @@ sd doctor --out "$RUN/doctor" 2>&1 | tee "$RUN/doctor.log"
 Windows NVML bridge 只加载 Windows NVML，不需要在 Windows 安装 Triton。保持 WSL 的本函数及覆盖设置，按主指南切换 `BACKEND=bridge` 即可。
 
 仍未取得目标机器的完整 3.7.1 traceback；因此本次改变是支持用户明确选择的运行配置，不声称已经定位上游缺陷。真实单卡 INT4、CUDAFUSE、硬件锁频和节能仍需实机分阶段验收。
+
+Validation: [override tests](validation/triton_override/REPORT.md).
