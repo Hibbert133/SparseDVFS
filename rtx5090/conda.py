@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from .native import ROOT, DEFAULT_GPU, configure_process, doctor, build, check_vllm_sources
+from .native import ROOT, DEFAULT_GPU, configure_process, configure_triton, doctor, build, check_vllm_sources
 from .run import write, read
 
 
@@ -17,6 +17,8 @@ def parser():
     p.add_argument('--gpu-uuid', default=DEFAULT_GPU)
     p.add_argument('--out', default='runs/conda')
     p.add_argument('--library-dir', default=str(ROOT/'build'))
+    p.add_argument('--triton-path', default=os.environ.get('SPARSEDVFS_TRITON_PATH'),
+                   help='Explicit existing directory containing independent Triton 3.6.0; does not install packages')
     p.add_argument('--gpu', help='GPU backend JSON, UUID must equal --gpu-uuid')
     p.add_argument('--backend', choices=['nvml', 'bridge', 'mock'], default='nvml')
     p.add_argument('--apply', action='store_true')
@@ -39,6 +41,7 @@ def parser():
 
 def main():
     p = parser(); a = p.parse_args()
+    if a.triton_path: configure_triton(a.triton_path)
     out = Path(a.out).resolve(); a.out = str(out)
     required = {
         'baseline': ('dataset',), 'chain': ('dataset','baseline'),

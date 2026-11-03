@@ -26,14 +26,49 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def triton_record(expected_root=None):
+    """Record imported code, not merely the installed distribution metadata."""
+    module = importlib.import_module('triton')
+    origin = Path(module.__file__).resolve()
+    if expected_root:
+        expected = Path(expected_root).resolve()/'triton'
+        if origin != expected/'__init__.py' or module.__version__ != '3.6.0':
+            raise RuntimeError(f'Expected explicit Triton 3.6.0 from {expected}; loaded {module.__version__} from {origin}')
+    files = {}
+    for file in sorted(origin.parent.rglob('*')):
+        if file.is_file() and '__pycache__' not in file.parts and file.suffix != '.pyc':
+            with file.open('rb') as source:
+                files[str(file.relative_to(origin.parent))] = hashlib.file_digest(source,'sha256').hexdigest()
+    return dict(version=module.__version__,path=str(origin),
+                package_sha256=hashlib.sha256(json.dumps(files,sort_keys=True).encode()).hexdigest())
+
+
+def configure_triton(path):
+    """Opt-in process-local override. Never installs/replaces a Conda package."""
+    root = Path(path).resolve()
+    if not (root/'triton/__init__.py').is_file():
+        raise ValueError('--triton-path must contain triton/__init__.py')
+    paths = [str(root)] + [p for p in os.environ.get('PYTHONPATH','').split(os.pathsep) if p and p != str(root)]
+    os.environ['PYTHONPATH'] = os.pathsep.join(paths)
+    sys.path[:] = [str(root)] + [p for p in sys.path if p != str(root)]
+    importlib.invalidate_caches()
+    value = triton_record(root)  # A pre-imported wrong module is an error, never silently reloaded.
+    os.environ['SPARSEDVFS_TRITON_PATH'] = str(root)
+    return value
+
+
 def environment_record():
     packages = {}
     for name in ('vllm', 'torch', 'triton', 'transformers'):
         try:
             spec = importlib.util.find_spec(name)
-            packages[name] = dict(version=importlib.metadata.version(name), path=spec.origin)
+            packages[name] = dict(version=importlib.metadata.version(name), path=spec.origin) if spec else None
         except (ImportError, ValueError):
             packages[name] = None
+    if os.environ.get('SPARSEDVFS_TRITON_PATH'):
+        actual = triton_record(os.environ['SPARSEDVFS_TRITON_PATH'])
+        actual['distribution_version'] = packages['triton']['version'] if packages['triton'] else None
+        packages['triton'] = actual
     library = Path(os.environ.get('SPARSEDVFS_LIBRARY_DIR', ROOT/'build'))
     try:
         commit = subprocess.run(['git','-C',str(ROOT),'rev-parse','HEAD'],capture_output=True,text=True,timeout=5)
@@ -45,7 +80,7 @@ def environment_record():
                 git_commit=commit, sources_sha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest(),
                 libraries={p.name: sha(p) for p in library.glob('libfuse*.so')},
                 env={k: os.environ.get(k) for k in ('CONDA_PREFIX', 'PYTHONPATH', 'TRITON_CACHE_DIR',
-                     'CUDA_VISIBLE_DEVICES', 'VLLM_USE_V2_MODEL_RUNNER', 'SPARSEDVFS_LIBRARY_DIR')})
+                     'CUDA_VISIBLE_DEVICES', 'VLLM_USE_V2_MODEL_RUNNER', 'SPARSEDVFS_LIBRARY_DIR', 'SPARSEDVFS_TRITON_PATH')})
 
 
 def check_vllm_sources():
@@ -63,8 +98,8 @@ def check_vllm_sources():
 def configure_process(model, uuid, library_dir):
     if not uuid.startswith('GPU-') or ',' in uuid:
         raise ValueError('Select exactly one full GPU UUID')
-    if '/tmp/triton-360-test' in os.environ.get('PYTHONPATH', ''):
-        raise RuntimeError('Temporary Triton override is active; run from a clean terminal (do not replace Conda Triton)')
+    if '/tmp/triton-360-test' in os.environ.get('PYTHONPATH', '') and not os.environ.get('SPARSEDVFS_TRITON_PATH'):
+        raise RuntimeError('Temporary Triton override requires explicit --triton-path /tmp/triton-360-test')
     os.environ.update(CUDA_VISIBLE_DEVICES=uuid, VLLM_USE_V2_MODEL_RUNNER='0',
                       SPARSEDVFS_GPU_UUID=uuid, SPARSEDVFS_MODEL=str(Path(model).resolve()),
                       SPARSEDVFS_LIBRARY_DIR=str(Path(library_dir).resolve()))

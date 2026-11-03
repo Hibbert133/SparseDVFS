@@ -52,7 +52,7 @@ class CondaTests(unittest.TestCase):
         self.assertEqual(args['tensor_parallel_size'], 1)
 
     def test_temporary_triton_and_multi_gpu_rejected(self):
-        with patch.dict(os.environ, {'PYTHONPATH': '/tmp/triton-360-test'}):
+        with patch.dict(os.environ, {'PYTHONPATH': '/tmp/triton-360-test', 'SPARSEDVFS_TRITON_PATH': ''}):
             with self.assertRaisesRegex(RuntimeError, 'Temporary Triton'):
                 configure_process('model', 'GPU-example', 'build')
         with self.assertRaises(ValueError):

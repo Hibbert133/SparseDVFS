@@ -35,7 +35,7 @@ sd cpu-test --out "$RUN/cpu"
 
 预期：doctor 显示当前 Python/包实际路径、vLLM 六个源文件哈希、CUDA 设备及头文件/运行库候选；CPU 测试 `successful: true`。仅 CUDA 测试可跳过。这里不会给你的真实 GPU 写频率。
 
-若 `PYTHONPATH` 仍包含 `/tmp/triton-360-test`，运行入口会拒绝。使用不执行旧启动脚本的新终端，先确认当前加载的是 Conda 的 Triton 3.7.1。不要删除临时目录或全局替换 Triton。本项目尚未取得 3.7.1 启动失败的实机 traceback；若有错误，保留完整 `process.log` 再决定隔离方案。
+如果你的 Qwen 依赖独立 Triton 3.6.0，**保留 PYTHONPATH 覆盖，不执行 unset**。使用新增的 `--triton-path` 明确指定已有安装目录，完整步骤见 [独立 Triton 3.6.0 操作说明](TRITON_360_zh.md)。入口核对实际导入版本、路径及包内容哈希，并传入子进程；它不会全局替换 Conda 的 Triton。未显式选择的临时覆盖仍会报错，避免无意中切换运行环境。
 
 ## 1. 构建本地动态库；先只读探测控制能力
 

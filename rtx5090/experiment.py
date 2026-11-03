@@ -298,6 +298,8 @@ def launch(a, folder, **job):
            '--min-seconds',str(a.min_seconds)]
     for flag,value in (('--calibration',a.calibration),('--power-evidence',a.power_evidence)):
         if value: cmd += [flag,str(Path(value).resolve())]
+    if os.environ.get('SPARSEDVFS_TRITON_PATH'):
+        cmd += ['--triton-path', os.environ['SPARSEDVFS_TRITON_PATH']]
     if a.apply: cmd.append('--apply')
     if a.ack_default_auto: cmd.append('--ack-default-auto')
     print('Running',folder.name,job['mode'],flush=True)

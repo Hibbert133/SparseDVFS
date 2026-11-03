@@ -4,6 +4,7 @@
 这是从 Thor v5 参考实现演进的 GPU-only 版本，不是论文作者发布的完整 FUSE 源码，也没有已测得的 5090 加速或节能结论。
 
 - **[Conda + WSL2 / vLLM 0.32 手动操作指南](CONDA_5090_zh.md)**（当前推荐入口，无 Docker）
+- [显式使用已有独立 Triton 3.6.0](TRITON_360_zh.md)（保留 PYTHONPATH 覆盖，不修改 Conda 包）
 - [0.32 兼容性依据与真实调用链](COMPATIBILITY_032.md)
 - [旧版 Docker 部署指南](QUICKSTART_5090_zh.md)
 - **[Conda 更新验证报告](validation/conda/REPORT_zh.md)**：188 项，185 通过，3 CUDA 跳过；含最终源码的 Linux CI
