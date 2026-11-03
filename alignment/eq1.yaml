@@ -1,0 +1,101 @@
+part: '01 — Timeline-based Performance Model'
+reviewed_at: '2026-11-03'
+status: '独立 Eq1 工具已实现，34 项本机检查通过；目标 GPU 参数与预测误差待验证'
+
+paper:
+  version: 'arXiv:2603.21908v1'
+  section: '4.1.1'
+  equation_number: 1
+  url: 'https://arxiv.org/html/2603.21908v1'
+  equation: >-
+    T_exe(f) = max(W_comp * (1-S_comp) / P_peak(f_cpu,f_gpu),
+    D_mem * (1-S_mem) / B_mem(f_mem)) + T_overhead
+
+paper_specified:
+  W_comp: '根据算子尺寸得到的理论计算量，单位 FLOP'
+  S_comp: '硬件可有效跳过的计算比例；不能直接用张量零值比例代替'
+  D_mem: '数据量，单位 byte；具体统计口径仍需核实'
+  S_mem: '存储稀疏带来的带宽节省系数，与 S_comp 分别处理'
+  P_peak: '对应 CPU/GPU 频率的计算能力，文中要求通过离线微基准获得'
+  B_mem: '对应内存频率的带宽，文中要求通过离线微基准获得'
+  T_overhead: '包含 kernel launch、同步等常量系统开销，单位 s'
+  composition: '计算与访存时间取最大值，再加 T_overhead'
+
+reviewed_code:
+  repository: 'https://github.com/Hibbert133/SparseDVFS'
+  branch: '5090'
+  commit: 'd78ba220deafd576cb539d9eb8ef8b2366417b8f'
+  local_checkout: 'C:\Users\Administrator\Documents\Codex\2026-10-31\c-users-administrator-documents-codex-2026\work\publish_5090'
+  mathematical_core: 'sparsedvfs/paper_core.py:23 — timeline_seconds'
+  dependency_validation: 'sparsedvfs/paper_calibration.py:16 — validate'
+  formula_prediction: 'sparsedvfs/paper_calibration.py:89 — predicted_candidates'
+  active_5090_candidate_path: 'rtx5090/planning.py:7 — candidate，当前使用实测延迟表'
+  standalone_entry: 'rtx5090/performance.py — doctor / collect / fit / validate'
+  implementation_state: '实现以所列提交为基线；通过 origin/5090 的 Git 提交与推送管理，目标机器 fetch 后快进更新'
+
+author_reference:
+  repository: 'https://github.com/ziyangzhang96/SparseDVFS'
+  commit: 'c524c51aac552fd16bec5743b1fb95309b46347b'
+  location: 'SparseDVFS.py:536 — profile_model'
+  observed_protocol: '设置频率后等 0.5 秒；预热 5 次；perf_counter 配合同步测量 5 次取均值'
+  missing: '公开脚本未提供 P_peak / B_mem / T_overhead 估计器或 Eq1 预测实现'
+
+stage_choices:
+  scope: '单 GPU 核心频率一维切片；不加载 Qwen，不改变 CPU/显存策略'
+  dtype: 'BF16，预分配输入输出，无梯度'
+  gpu_uuid: 'GPU-22d1cd22-d198-45c4-2b54-974484026ab5'
+  gpu_mhz: [2250, 2527]
+  traffic_semantics: '用户选择 logical_tensor_bytes_not_measured_DRAM'
+  gemm_work_flop: '2*M*N*K'
+  gemm_data_byte: '2*(M*K+K*N+M*N)'
+  add_work_flop: '元素数'
+  add_data_byte: '3*元素数*2'
+  p_peak: '各频点 8192 方阵 GEMM 的有效吞吐；使用独立 CUDA Event 均值'
+  b_mem: '2527 MHz、256 MiB/缓冲区加法的逻辑带宽；所有核心频点共用一个值'
+  overhead: '标定形状墙钟残差的非负中位数；一个全局常量，跨频率/算子共享'
+  calibration_shapes: 'GEMM 1024/2048/4096；加法每缓冲区 8/64 MiB'
+  validation_shapes: 'GEMM 1536/3072/6144；加法每缓冲区 16/128 MiB，不参与拟合'
+  readback: '正式测时前后核心误差不超过 15 MHz，显存同档；失败停止并尝试恢复'
+  provenance: '上述算子、形状、逻辑流量与估计器均是本阶段选择，不归为作者参数'
+
+findings:
+  aligned:
+    - 'timeline_seconds 的运算结构与 Eq. (1) 一致'
+    - 'S_comp 与 S_mem 分别作用于计算量和数据量'
+    - '公式标定校验限制 P_peak 只依赖 CPU/GPU 频率，B_mem 只依赖内存频率'
+    - '独立工具直接调用公式；容量、标定与预测核对数据分别处理，不依赖功耗拟合'
+  pending:
+    - '实际执行目标 GPU 标定，获取 P_peak / B_mem / T_overhead 与预测误差'
+    - '逻辑字节量已明示；实际 DRAM 流量、缓存与重复装载影响尚未核对'
+    - '固定开销估计器已实现，仍需实测验证其适用范围'
+    - '现有 dense Qwen 路径取 S_comp=S_mem=0，尚不能实证稀疏系数分支'
+    - '当前 5090 默认候选生成不调用此公式；数学核心存在不等于实际流程已使用'
+  not_fully_specified_in_reviewed_section:
+    - '微基准的具体实现、采样重复数与校准参数'
+    - '融合、缓存与重复访问下 D_mem 的具体统计方法'
+    - '固定开销的标定程序与粒度'
+
+verification:
+  kind: '本机 CPU 上的既有合成数值与依赖检查；不属于 GPU 交叉实验'
+  command: >-
+    python -B -m unittest discover -s tests -p test_v4_paper.py
+    -k eq1 -k test_peak_cannot_depend_on_emc
+    -k test_bandwidth_cannot_depend_on_cpu_gpu -v
+  executed: true
+  passed: 3
+  failed: 0
+  hardware_calibration_executed: false
+  real_gpu_prediction_accuracy_verified: false
+  implementation_checks:
+    executed: true
+    tests_run: 34
+    passed: 34
+    skipped: 0
+    new_eq1_tests: 22
+    evidence: 'outputs/eq1-test-results.json 与 outputs/eq1-test-log.txt（交接目录）'
+    scope: '本机 CPU 的合成数值、测时 API 替身、后端与传输回归；无目标 GPU 测量'
+
+next_small_step:
+  focus: '在目标机器 fetch 并快进 origin/5090，重启 Windows bridge，先运行独立 doctor'
+  deliverable: '按 PERFORMANCE_EQ1_zh.md 依次取得真实采样、参数文件与预测核对报告'
+  completion_rule: '读回、恢复与参数来源明确；如实报告误差，不宣称完整三域或稀疏机制已复现'

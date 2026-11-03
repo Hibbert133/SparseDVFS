@@ -78,6 +78,7 @@ class NVML:
             ('energy_mj', 'nvmlDeviceGetTotalEnergyConsumption', C.c_ulonglong, ()),
             ('power_mw', 'nvmlDeviceGetPowerUsage', C.c_uint, ()),
             ('temperature_c', 'nvmlDeviceGetTemperature', C.c_uint, (C.c_uint(0),)),
+            ('memory_clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(2),)),
             ('clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(0),))):
             value = kind()
             try:
