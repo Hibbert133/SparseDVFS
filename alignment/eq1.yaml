@@ -86,6 +86,13 @@ verification:
   failed: 0
   hardware_calibration_executed: false
   real_gpu_prediction_accuracy_verified: false
+  bridge_connectivity:
+    reported_at: '2026-11-03'
+    evidence: '目标机用户反馈：启用镜像网络并重启 WSL 后，socket.create_connection 到 127.0.0.1:50900 显示连接成功'
+    environment: 'WSL 2.6.0.0；Windows build 26100.6584；此前无 .wslconfig'
+    tcp_reachable_user_reported: true
+    authenticated_doctor_verified: false
+    clock_set_and_restore_verified: false
   implementation_checks:
     executed: true
     tests_run: 34
@@ -96,6 +103,6 @@ verification:
     scope: '本机 CPU 的合成数值、测时 API 替身、后端与传输回归；无目标 GPU 测量'
 
 next_small_step:
-  focus: '在目标机器 fetch 并快进 origin/5090，重启 Windows bridge，先运行独立 doctor'
+  focus: '目标机 TCP 已连通；重新设置 WSL 环境与同一 token，使用新输出目录运行 doctor，成功后再 collect'
   deliverable: '按 PERFORMANCE_EQ1_zh.md 依次取得真实采样、参数文件与预测核对报告'
   completion_rule: '读回、恢复与参数来源明确；如实报告误差，不宣称完整三域或稀疏机制已复现'

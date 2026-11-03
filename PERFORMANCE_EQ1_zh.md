@@ -52,6 +52,36 @@ python -B -m rtx5090.performance --help
 
 ## 2．启动 Windows bridge
 
+### 2.1 网络前提：WSL 镜像网络
+
+当前 bridge 固定监听 Windows 的 `127.0.0.1:50900`，不支持 `--host`。WSL 需使用镜像网络才能按本文地址访问它；不能只把客户端地址改成 NAT 网关。参见[微软镜像网络说明](https://learn.microsoft.com/windows/wsl/networking#mirrored-mode-networking)。
+
+2026-11-03 目标机用户反馈：WSL 2.6.0.0、Windows build 26100.6584，最初无 `.wslconfig`；Windows 已监听但 WSL 报 `Connection refused`。按下述方式启用镜像网络并重启后，用户确认 TCP 连接成功。这仅证明端口可达，尚不证明 token 认证、NVML 查询、真实锁频或恢复通过。
+
+仅在连接检查失败、确认需要切换网络时执行。此操作改变该 Windows 用户下所有 WSL2 发行版的网络模式；`wsl --shutdown` 会停止所有 WSL 实例。先保存工作并正常停止自己的任务，不中断其他用户任务。已启用镜像网络的机器无需重复配置。
+
+在 **Windows PowerShell** 检查版本和现有配置：
+
+```powershell
+wsl --version
+$cfg = Join-Path $env:USERPROFILE ".wslconfig"
+if (Test-Path -LiteralPath $cfg) { Get-Content -LiteralPath $cfg }
+```
+
+确认没有配置文件时，执行以下命令；如已有文件则停止，保留原配置，人工合并 `[wsl2]` 下的 `networkingMode=mirrored`，不覆盖其他设置。
+
+```powershell
+if (Test-Path -LiteralPath $cfg) { throw ".wslconfig 已存在，停止以避免覆盖" }
+Set-Content -LiteralPath $cfg -Encoding ascii -Value "[wsl2]`nnetworkingMode=mirrored"
+Get-Content -LiteralPath $cfg
+wsl --shutdown
+wsl
+```
+
+如需回退，只移除本次新增的设置，保留其他配置，并在保存工作后再次重启 WSL。重启后重新激活 Conda、核实 `/tmp/triton-360-test` 仍存在，并重设下面的环境变量、GPU UUID、输出目录与 token。Windows bridge 进程不因 WSL 重启而自动重启，仍使用原 token。
+
+### 2.2 在 Windows 管理员窗口启动服务
+
 在 **Windows 管理员 PowerShell** 执行：
 
 ```powershell
@@ -73,6 +103,30 @@ python -B -m rtx5090.bridge --uuid GPU-22d1cd22-d198-45c4-2b54-974484026ab5 --po
 ```
 
 保持窗口运行。启动桥接只允许后续经过认证的写频请求，不会立即锁频。第一张卡启动前应处于默认自动频率管理状态。
+
+### 2.3 先检查端口可达性
+
+在 **WSL Bash** 执行，无需 token，不写频率：
+
+```bash
+python3 - <<'PY'
+import socket
+try:
+    with socket.create_connection(("127.0.0.1", 50900), timeout=3):
+        print("连接成功")
+except OSError as e:
+    print(f"连接失败：{e}")
+PY
+```
+
+预期为 `连接成功`。若失败，在另一个 **Windows PowerShell** 检查：
+
+```powershell
+Get-NetTCPConnection -LocalPort 50900 -State Listen |
+    Select-Object LocalAddress, LocalPort, OwningProcess
+```
+
+无监听时检查 bridge 启动报错；Windows 有监听而 WSL 不通时先检查镜像网络是否生效。不要反复更换 token，也不要直接关闭防火墙。TCP 检查成功后再运行 doctor，验证认证、设备与环境。
 
 ## 3．在 WSL 检查环境和连接
 
@@ -103,7 +157,9 @@ python -B -m rtx5090.performance doctor --gpu-uuid "$PERF_GPU_UUID" --backend br
 遇到错误停在当前步骤：
 
 - `Memory clock unavailable`：先确认 Windows 与 WSL 访问同一份已打补丁的仓库，并重启旧桥接进程；若驱动仍不提供读回，保留错误，不用猜测值代替。
-- 连接拒绝、超时、认证失败：检查桥接窗口和本地 token；不自行修改网络、驱动或防火墙。
+- `Connection refused`：连接尚未建立，发生在 token 验证之前；按 2.3 检查监听和网络。超时也先检查连接路径，不自动修改防火墙或驱动。
+- 认证失败：只在自己的 Windows/WSL 终端间核对同一个 token；Windows 启动 bridge 后更改环境变量不会更新已运行进程的 token。
+- `Evidence already exists`：失败的 doctor 也会保留 `doctor.json`，不要删除或覆盖。修复当前错误后执行 `PERF_OUT="$PWD/runs/eq1-$(date +%Y%m%d-%H%M%S)"`，等待至少一秒避免同名，再重试 doctor；成功后 collect/fit/validate 沿用该目录。
 - CUDA/UUID/Triton 路径错误：核对当前 Conda 及独立 Triton 路径；不覆盖已安装环境。`/tmp` 路径在重启后可能需要重新核实。
 
 ## 4．采集两个固定频率下的数据
