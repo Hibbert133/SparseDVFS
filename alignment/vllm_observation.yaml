@@ -1,0 +1,33 @@
+part: 'Eq. (1) — target-workload observation, first delivery'
+date: '2026-11-03'
+paper: 'https://arxiv.org/html/2603.21908v1#S4.SS1.SSS1'
+scope: 'Read-only Qwen3.5-27B BF16 TP=2 dummy eager vLLM 0.32 V1 inventory'
+formula: 'T=max(W*(1-S_comp)/P_peak,D*(1-S_mem)/B_mem)+T_overhead'
+formula_use_in_this_delivery: false
+implementation_choices:
+  - 'Independent worker; no FUSE/controller imports, no frequency writes'
+  - 'Development input lengths 128/512/2048; output 64; one request at a time'
+  - 'One unobserved warmup then three observed requests per scenario'
+  - 'Holdout 1024 is declared but collection is not exposed in first delivery'
+  - 'Dispatcher scopes + module parent labels + profiler correlation IDs'
+  - 'No per-operator synchronization; device events are stream-local diagnostic spans'
+  - 'Unknown/ambiguous GPU activity is retained, never counted as covered'
+  - 'Inventory is not replay validation or end-to-end latency prediction'
+pending:
+  - 'Verify both live worker identities and recorded configuration on target'
+  - 'Target CUDA traces and inventories; local synthetic checks are insufficient'
+  - 'Implement replay adapters only after real signatures are available'
+working_launch_evidence:
+  source: 'User supplied successful serve script on 2026-11-03'
+  explicit: 'dummy TP2 max_model_len4096 max_num_seqs1 memory0.90 reasoning_parser=qwen3'
+  nccl: 'NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 NCCL_IB_DISABLE=1'
+  triton_package: '/mnt/d/s00958243/triton-360'
+  triton_cache: '/tmp/triton360-vllm-cache'
+  differences: 'Observation explicitly selects BF16/eager/V1/language_model_only, disables prefix caching, uses offline token IDs; original defaults unverified'
+verification:
+  cpu_tests: 63
+  observation_tests: 18
+  failed: 0
+  skipped: 0
+  target_cuda_executed: false
+  evidence: 'validation/vllm_observe/REPORT_zh.md'

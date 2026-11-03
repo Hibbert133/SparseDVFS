@@ -1,6 +1,6 @@
 part: '01 — Timeline-based Performance Model'
 reviewed_at: '2026-11-03'
-status: '已补足失败读回与可选有界检查；目标机 doctor ready，2250 MHz 完成 12 组，2527 MHz 测时前失败；完整标定待重采'
+status: '用户报告 24 组完成并已 fit/validate，预测误差较大；转向实际 vLLM 执行清单，未完成参数适用性验收'
 
 paper:
   version: 'arXiv:2603.21908v1'
@@ -71,7 +71,7 @@ findings:
     - '公式标定校验限制 P_peak 只依赖 CPU/GPU 频率，B_mem 只依赖内存频率'
     - '独立工具直接调用公式；容量、标定与预测核对数据分别处理，不依赖功耗拟合'
   pending:
-    - '实际执行目标 GPU 标定，获取 P_peak / B_mem / T_overhead 与预测误差'
+    - '已有用户报告的参数和误差；独立容量/开销可信度、真实算子适用性仍待验证'
     - '逻辑字节量已明示；实际 DRAM 流量、缓存与重复装载影响尚未核对'
     - '固定开销估计器已实现，仍需实测验证其适用范围'
     - '现有 dense Qwen 路径取 S_comp=S_mem=0，尚不能实证稀疏系数分支'
@@ -91,7 +91,8 @@ verification:
   passed: 3
   failed: 0
   hardware_calibration_executed: true
-  hardware_calibration_completed: false
+  hardware_calibration_completed: true
+  hardware_calibration_completion_basis: user_reported_stdout_not_raw_data_audit
   real_gpu_prediction_accuracy_verified: false
   bridge_connectivity:
     reported_at: '2026-11-03'
@@ -100,6 +101,23 @@ verification:
     tcp_reachable_user_reported: true
     authenticated_doctor_verified: true
     clock_set_and_restore_verified: false
+  target_completed_collection:
+    source: '2026-11-03 用户粘贴 collect/fit/validate 输出；开发侧未审计原始目录'
+    records: 24
+    gpu_mhz: [2250, 2527]
+    memory_clock_mhz: 13801
+    precheck_timeout_s: 5
+    reset_returned: true
+    physical_restore_verified: false
+    p_peak_flops_by_gpu_mhz: {2250: 184236099152112.2, 2527: 205733144304136.72}
+    b_mem_logical_Bps: 1506989730334.109
+    t_overhead_s: 0.00006333912503469038
+    validation_cases: 10
+    mean_absolute_relative_error: 0.339259693490726
+    max_absolute_relative_error: 1.1233175817475831
+    fraction_within_10_percent: 0.4
+    interpretation: '采集闭环完成不等于参数可信度通过；小加法实测低于统一开销，128 MiB 加法两频点差异需解释'
+    next_protocol: 'alignment/vllm_observation.yaml；先实际推理清单，再开发回放适配器；人工方阵扩样暂停'
   target_partial_collection:
     source: '2026-11-03 用户转述目标机日志；开发侧未访问硬件或原始目录'
     completed_rate_mhz: 2250
@@ -134,6 +152,6 @@ verification:
     scope: '本机 CPU 的合成数值、测时 API 替身、后端与传输回归；无目标 GPU 测量'
 
 next_small_step:
-  focus: 'fetch 快进更新，重启 Windows bridge，复用持久 Triton；新目录 doctor/默认 collect，先取得故障阶段证据；可选有界模式另建目录并声明差异'
-  deliverable: '按 PERFORMANCE_EQ1_zh.md 依次取得真实采样、参数文件与预测核对报告'
-  completion_rule: '读回、恢复与参数来源明确；如实报告误差，不宣称完整三域或稀疏机制已复现'
+  focus: '首交付 rtx5090.observe doctor/collect/summarize，在默认自动频率下采双 rank 开发清单'
+  deliverable: 'VLLM_OBSERVE_zh.md；128/512/2048 输入、64 输出，每场景预热一次后观察三次'
+  completion_rule: '真实 UUID、worker/runner、调度步、算子/kernel 与未知部分可追溯；1024 场景封存；不将观察通过等同 Eq1 验证'

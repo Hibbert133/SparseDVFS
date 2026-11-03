@@ -1,0 +1,16 @@
+{
+  "tests": 63,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "hardware_executed": false,
+  "selection": [
+    "test_observe_vllm",
+    "test_performance_eq1",
+    "test_v4_paper.Equations.test_eq1_compute_memory_and_effective_storage_are_separate",
+    "test_v4_paper.Calibration.test_peak_cannot_depend_on_emc",
+    "test_v4_paper.Calibration.test_bandwidth_cannot_depend_on_cpu_gpu",
+    "test_5090.ProtocolTests",
+    "test_energy_5090.EnergyTests.test_nvml_energy_width_and_power_units"
+  ]
+}
