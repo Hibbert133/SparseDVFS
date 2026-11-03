@@ -19,3 +19,9 @@ python -B -m unittest discover -s tests -p test_observe_vllm.py -v
 ## RPC 版本类型修复
 
 2026-11-03 用户实机反馈 `process_output_sockets` 无法序列化 `torch.torch_version.TorchVersion`。修正 identity 中的版本字段为内置 str，保留安全序列化默认值。新增 str 子类夹具，调用真实 observation_identity 并递归检查返回树的精确内置类型。修复后 19 项观察工具 CPU 测试全部通过；没有在本机安装 torch/msgspec 或执行真实 RPC/CUDA，目标重采待确认。上述 63 项为前次检查记录。
+
+## CPU/GPU annotation 分类修复
+
+2026-11-03 用户提供两 rank 的分类计数，均为 211684 条 CPU scope、151406 条同名 GPU annotation，缺失 0。原关联器把二者混算重复。修复只接纳 CPU user_annotation 作为 launch 容器。新增三项回归：同名 GPU 标记不重复计数、不计作额外 kernel；真实 CPU 重复仍拒绝；GPU 标记不能替代缺失 CPU 标记。
+
+本轮观察工具 22 项 CPU 测试全部通过（0 跳过），命令仍为上文 unittest discover。开发侧未收到完整 trace，真实离线关联结果待用户确认；不宣称九请求清单或 CUDA 验收完成。

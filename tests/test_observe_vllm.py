@@ -111,6 +111,29 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(result['fully_attributed'])
         self.assertEqual(len(result['unattributed_activities']), 1)
 
+    def test_gpu_annotation_is_not_duplicate_cpu_scope_or_extra_kernel_work(self):
+        trace = events()
+        trace.append(dict(trace[0], cat='gpu_user_annotation', pid=0,
+                          tid=7, ts=10000, dur=100))
+        rows = [row()]
+        result = correlate(trace, rows)
+        self.assertTrue(result['fully_attributed'])
+        self.assertEqual(result['gpu_activities'], 1)
+        self.assertEqual(result['gpu_activity_sum_us'], 100)
+        self.assertEqual(len(rows[0]['gpu_activities']), 1)
+
+    def test_real_duplicate_cpu_annotations_still_fail(self):
+        trace = events()
+        trace.append(dict(trace[0]))
+        with self.assertRaisesRegex(ValueError, 'missing=0, duplicate=1'):
+            correlate(trace, [row()])
+
+    def test_gpu_annotation_cannot_replace_missing_cpu_scope(self):
+        trace = events()
+        trace[0]['cat'] = 'gpu_user_annotation'
+        with self.assertRaisesRegex(ValueError, 'missing=1, duplicate=0'):
+            correlate(trace, [row()])
+
     def test_wrong_cpu_thread_or_conflicting_correlation_not_guessed(self):
         for mutate in (lambda t: t[1].update(tid=21),
                        lambda t: t.append(dict(t[1], ts=500))):

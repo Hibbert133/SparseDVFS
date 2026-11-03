@@ -113,3 +113,9 @@ python -B -m rtx5090.observe summarize --out "$OBS_OUT"
 若日志出现 `TorchVersion is not serializable`，是观察 worker 返回版本对象的类型问题。修复将版本字段显式转换为内置字符串，不需要 `VLLM_ALLOW_INSECURE_SERIALIZATION=1`。`Cudagraph is disabled under eager mode` 是正常提示。
 
 先在采集终端 Ctrl+C 结束本次进程，再 fetch/快进更新。保留失败目录，新建 OBS_OUT，重新运行 doctor/collect；旧 doctor 绑定旧源码，不能复用。若 Ctrl+C 后仍有本次 worker 占用 GPU，先确认并停止本次残留进程，不结束其他任务。
+
+## 已修复：CPU/GPU 同名 annotation 被误判重复
+
+2026-11-03 用户 trace：每 rank 211684 条 CPU `user_annotation`，151406 条同名 `gpu_user_annotation`，无缺失标记。旧代码不区分类别而误报重复；现在仅用 CPU `user_annotation` 建立 launch 所属范围，GPU annotation 保留在原始 trace 中但不当作额外 kernel。真实 CPU 重复或缺失仍报错，未知 GPU 活动继续保留。
+
+可先离线读取旧 trace/request，调用 `rtx5090.observe_core.correlate(events, rows)` 检查关联；不要改旧失败记录的 status，不将单个请求视作九请求采集完成。完整采集仍需新目录 doctor/collect。

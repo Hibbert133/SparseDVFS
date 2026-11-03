@@ -133,11 +133,18 @@ def correlate(events, rows):
         raise ValueError('Duplicate dispatcher markers')
     scopes, seen = defaultdict(list), Counter()
     for e in events:
-        if e.get('ph') == 'X' and e.get('name') in expected:
+        # Kineto can emit a same-name gpu_user_annotation span. Only the
+        # CPU record_function scope owns CUDA launch API calls. GPU spans
+        # neither duplicate that scope nor count as additional kernel work.
+        if (e.get('ph') == 'X' and e.get('cat') == 'user_annotation'
+                and e.get('name') in expected):
             scopes[(e.get('pid'), e.get('tid'))].append(e)
             seen[e['name']] += 1
     if set(seen) != set(expected) or any(v != 1 for v in seen.values()):
-        raise ValueError('Profiler is missing or duplicating dispatcher scopes')
+        missing = len(set(expected) - set(seen))
+        duplicate = sum(v != 1 for v in seen.values())
+        raise ValueError('Profiler is missing or duplicating dispatcher scopes '
+                         f'(CPU user_annotation: missing={missing}, duplicate={duplicate})')
     starts = {}
     for thread, entries in scopes.items():
         entries.sort(key=lambda e: e['ts'])
