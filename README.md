@@ -6,7 +6,8 @@
 - **[Conda + WSL2 / vLLM 0.32 手动操作指南](CONDA_5090_zh.md)**（当前推荐入口，无 Docker）
 - [0.32 兼容性依据与真实调用链](COMPATIBILITY_032.md)
 - [旧版 Docker 部署指南](QUICKSTART_5090_zh.md)
-- [本次虚拟验证报告](validation/REPORT_zh.md)
+- **[Conda 更新验证报告](validation/conda/REPORT_zh.md)**：188 项，185 通过，3 CUDA 跳过；含最终源码的 Linux CI
+- [旧版虚拟验证报告](validation/REPORT_zh.md)
 - [版本锁定](configs/5090.lock.json)：vLLM 0.19.0 amd64 镜像、量化模型 revision 与配置。
 - [虚拟测试入口](scripts/test_5090.sh)：真实 C++ 编译、调度测试、桥接测试及假设效果模型。
 - Conda 入口为 `python -m rtx5090.conda`；`rtx5090.run` 保留旧 Docker 路径。原 `demo.py`、`thor_repro.sh` 和 Thor 文档仅供历史参考，不用于 5090。
