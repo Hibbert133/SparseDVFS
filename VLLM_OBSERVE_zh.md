@@ -107,3 +107,9 @@ python -B -m rtx5090.observe summarize --out "$OBS_OUT"
 - 签名按 rank、阶段、执行名、输入输出元数据及实际 kernel 名称区分；opaque 操作额外保留上下文长度等状态。操作不被拆成猜测的普通 GEMM。
 - 分类来自名称提示，不是已证明的性能瓶颈。所有签名初始均为 `replay_status: not_implemented`、`equation_validated: false`。
 - 本机测试使用 CPU 替身，目标 5090 上的观察兼容性和完整性需要实测确认。第一交付完成不等于整份 Eq. (1) 计划完成。
+
+## 已修复：TorchVersion 无法通过 RPC 序列化
+
+若日志出现 `TorchVersion is not serializable`，是观察 worker 返回版本对象的类型问题。修复将版本字段显式转换为内置字符串，不需要 `VLLM_ALLOW_INSECURE_SERIALIZATION=1`。`Cudagraph is disabled under eager mode` 是正常提示。
+
+先在采集终端 Ctrl+C 结束本次进程，再 fetch/快进更新。保留失败目录，新建 OBS_OUT，重新运行 doctor/collect；旧 doctor 绑定旧源码，不能复用。若 Ctrl+C 后仍有本次 worker 占用 GPU，先确认并停止本次残留进程，不结束其他任务。

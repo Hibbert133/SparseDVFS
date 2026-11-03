@@ -137,8 +137,11 @@ class ObservationWorker(Worker):
             v2_runner=self.use_v2_model_runner, worker=file_identity(type(self)),
             runner=file_identity(type(self.model_runner)),
             model=file_identity(type(self.model_runner.get_model())),
-            vllm_version=vllm.__version__, torch_version=torch.__version__, torch_cuda=torch.version.cuda,
-            triton=dict(version=triton.__version__, file=triton.__file__,
+            # RPC uses strict msgpack: TorchVersion is a str subclass, not a
+            # supported builtin string. Do not enable pickle fallback for it.
+            vllm_version=str(vllm.__version__), torch_version=str(torch.__version__),
+            torch_cuda=None if torch.version.cuda is None else str(torch.version.cuda),
+            triton=dict(version=str(triton.__version__), file=str(triton.__file__),
                         sha256=hashlib.sha256(Path(triton.__file__).read_bytes()).hexdigest()),
             vllm_sources_sha256=self._ob_sources, actual_config=selected,
             communication_env={key: os.environ.get(key) for key in

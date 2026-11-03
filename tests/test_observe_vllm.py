@@ -267,6 +267,49 @@ class LauncherTests(unittest.TestCase):
 
 
 class ObserverTests(unittest.TestCase):
+    def test_identity_rpc_contains_only_builtin_types_with_torch_version_subclass(self):
+        class TorchVersion(str): pass
+        name = 'rtx5090.observe_worker'
+        with tempfile.TemporaryDirectory() as folder:
+            package = Path(folder)/'triton'
+            package.mkdir()
+            source = package/'__init__.py'
+            source.write_text('# fixture', encoding='utf-8')
+            modules = {'torch': NS(__version__=TorchVersion('2.13.0+cu129'),
+                       version=NS(cuda='12.9'), cuda=NS(get_device_properties=lambda device:
+                           NS(uuid=GPU_UUIDS[0], name='test GPU'))),
+                       'triton': NS(__version__='3.6.0', __file__=str(source)),
+                       'vllm': NS(__version__='0.32.0'),
+                       'vllm.v1.worker.gpu_worker': NS(Worker=type('Worker', (), {}))}
+            with patch.dict(sys.modules, modules), patch.dict(observe.os.environ,
+                    {'SPARSEDVFS_TRITON_PATH': folder, **observe.NCCL_ENV}):
+                sys.modules.pop(name, None)
+                try:
+                    mod = importlib.import_module(name)
+                    worker = mod.ObservationWorker.__new__(mod.ObservationWorker)
+                    worker.rank = worker.local_rank = worker.device = 0
+                    worker.use_v2_model_runner = False
+                    worker._ob_sources = {}
+                    worker.model_runner = NS(get_model=lambda: object())
+                    worker.vllm_config = NS(
+                        model_config=NS(dtype='torch.bfloat16', quantization=None, enforce_eager=True),
+                        parallel_config=NS(tensor_parallel_size=2),
+                        scheduler_config=NS(), cache_config=NS(), load_config=NS(load_format='dummy'))
+                    with patch.object(mod, 'file_identity', return_value={'type': 'fixture'}):
+                        result = worker.observation_identity()
+                    def strict_builtin(value):
+                        self.assertIn(type(value), (dict, list, str, int, float, bool, type(None)))
+                        if type(value) is dict:
+                            for key, item in value.items():
+                                strict_builtin(key)
+                                strict_builtin(item)
+                        elif type(value) is list:
+                            for item in value: strict_builtin(item)
+                    strict_builtin(result)
+                    self.assertEqual(result['torch_version'], '2.13.0+cu129')
+                finally:
+                    sys.modules.pop(name, None)
+
     def test_failed_finish_stops_profiler_removes_hooks_and_retains_evidence(self):
         name = 'rtx5090.observe_worker'
         modules = {'torch': NS(), 'vllm': NS(),

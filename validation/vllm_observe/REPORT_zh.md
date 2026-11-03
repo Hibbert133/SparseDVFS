@@ -15,3 +15,7 @@ python -B -m unittest discover -s tests -p test_observe_vllm.py -v
 目标机尚需运行 `VLLM_OBSERVE_zh.md`：核对真实 worker/runner、双卡 CUDA profiler、调用元数据及覆盖率。未运行目标模型、未修改频率、未验证 Eq. (1) 参数或精度；未实现回放适配器。原服务命令未显式 BF16/eager/V1，本轮明确这些设置并记录差异。
 
 用户提供的旧 performance 结果已记入 `alignment/eq1.yaml`：24 组采集完成、10 项预测核对的 ±10% 命中率为 40%；开发侧未取得原始数据复核。reset 返回成功仍不等于物理恢复已验证。
+
+## RPC 版本类型修复
+
+2026-11-03 用户实机反馈 `process_output_sockets` 无法序列化 `torch.torch_version.TorchVersion`。修正 identity 中的版本字段为内置 str，保留安全序列化默认值。新增 str 子类夹具，调用真实 observation_identity 并递归检查返回树的精确内置类型。修复后 19 项观察工具 CPU 测试全部通过；没有在本机安装 torch/msgspec 或执行真实 RPC/CUDA，目标重采待确认。上述 63 项为前次检查记录。
