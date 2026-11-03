@@ -35,7 +35,14 @@ def environment_record():
         except (ImportError, ValueError):
             packages[name] = None
     library = Path(os.environ.get('SPARSEDVFS_LIBRARY_DIR', ROOT/'build'))
+    try:
+        commit = subprocess.run(['git','-C',str(ROOT),'rev-parse','HEAD'],capture_output=True,text=True,timeout=5)
+        commit = commit.stdout.strip() if commit.returncode == 0 else None
+    except (OSError,subprocess.TimeoutExpired): commit = None
+    sources = {str(p.relative_to(ROOT)):sha(p) for folder in ('rtx5090','cpp','sparsedvfs','sparsedvfs_vllm')
+               for p in (ROOT/folder).glob('*') if p.suffix in ('.py','.cpp','.h')}
     return dict(python=sys.version, executable=sys.executable, packages=packages,
+                git_commit=commit, sources_sha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest(),
                 libraries={p.name: sha(p) for p in library.glob('libfuse*.so')},
                 env={k: os.environ.get(k) for k in ('CONDA_PREFIX', 'PYTHONPATH', 'TRITON_CACHE_DIR',
                      'CUDA_VISIBLE_DEVICES', 'VLLM_USE_V2_MODEL_RUNNER', 'SPARSEDVFS_LIBRARY_DIR')})
@@ -139,6 +146,13 @@ def doctor(model):
     headers, libraries = cuda_paths()
     result = dict(environment=environment_record(), cuda_headers=list(map(str, headers)),
                   cudart=list(map(str, libraries)), compiler=shutil.which('g++'))
+    try:
+        import torch
+        result['torch_cuda'] = dict(version=torch.version.cuda, available=torch.cuda.is_available(),
+                                    devices=[dict(index=i,name=torch.cuda.get_device_name(i),
+                                                  uuid=str(getattr(torch.cuda.get_device_properties(i),'uuid',None)))
+                                             for i in range(torch.cuda.device_count())])
+    except Exception as exc: result['torch_cuda_error'] = str(exc)
     try:
         result['vllm_source_hashes'] = check_vllm_sources()
     except Exception as exc:

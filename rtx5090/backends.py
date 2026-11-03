@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import time
+import threading
 
 
 class Mock:
@@ -18,6 +19,10 @@ class Mock:
         self.calls.append(mhz); self.current = mhz
     def read(self): return self.current
     def reset(self): self.calls.append('reset'); self.current = 0
+    def telemetry(self):
+        return dict(uuid=self.uuid, synthetic=True, timestamp_ns=time.monotonic_ns(),
+                    energy_mj=None, power_mw=100000, clock_mhz=self.current, temperature_c=40,
+                    utilization_pct=100, memory_used_bytes=0, processes=[], process_query_supported=True)
     def close(self): pass
 
 
@@ -61,6 +66,30 @@ class NVML:
     def set(self, mhz):
         self._call('nvmlDeviceSetGpuLockedClocks', self.handle, C.c_uint(mhz), C.c_uint(mhz))
     def reset(self): self._call('nvmlDeviceResetGpuLockedClocks', self.handle)
+    def telemetry(self):
+        result = dict(uuid=self.uuid, synthetic=False, timestamp_ns=time.monotonic_ns(), errors={})
+        for key, name, kind, prefix in (
+            ('energy_mj', 'nvmlDeviceGetTotalEnergyConsumption', C.c_ulonglong, ()),
+            ('power_mw', 'nvmlDeviceGetPowerUsage', C.c_uint, ()),
+            ('temperature_c', 'nvmlDeviceGetTemperature', C.c_uint, (C.c_uint(0),)),
+            ('clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(0),))):
+            value = kind()
+            try:
+                self._call(name, self.handle, *prefix, C.byref(value)); result[key] = value.value
+            except (RuntimeError, AttributeError) as exc:
+                result[key] = None; result['errors'][key] = str(exc)
+        class Util(C.Structure):
+            _fields_ = [('gpu', C.c_uint), ('memory', C.c_uint)]
+        class Memory(C.Structure):
+            _fields_ = [('total', C.c_ulonglong), ('free', C.c_ulonglong), ('used', C.c_ulonglong)]
+        for key, name, kind, field in (('utilization_pct', 'nvmlDeviceGetUtilizationRates', Util, 'gpu'),
+                                      ('memory_used_bytes', 'nvmlDeviceGetMemoryInfo', Memory, 'used')):
+            value = kind()
+            try:
+                self._call(name, self.handle, C.byref(value)); result[key] = getattr(value, field)
+            except (RuntimeError, AttributeError) as exc:
+                result[key] = None; result['errors'][key] = str(exc)
+        return result
     def close(self): self._call('nvmlShutdown')
 
 
@@ -70,7 +99,20 @@ class Bridge:
         self.socket = socket.create_connection((host, port), timeout=5)
         self.file = self.socket.makefile('rwb'); self.token = token; self.uuid = uuid; self.seq = 0
         self.synthetic = False
+        self.io_lock = threading.RLock()
+        self.stop = threading.Event(); self.heartbeat_error = None
+        self.heartbeat = threading.Thread(target=self._heartbeat, daemon=True)
+        self.heartbeat.start()
+    def _heartbeat(self):
+        while not self.stop.wait(5):
+            try: self.request('read')
+            except Exception as exc:
+                self.heartbeat_error = exc; return
     def request(self, op, **kwargs):
+        with self.io_lock:
+            if self.heartbeat_error: raise RuntimeError('Bridge heartbeat failed') from self.heartbeat_error
+            return self._request(op, **kwargs)
+    def _request(self, op, **kwargs):
         self.seq += 1
         request = dict(token=self.token, uuid=self.uuid, seq=self.seq, op=op, **kwargs)
         start = time.monotonic_ns()
@@ -87,7 +129,9 @@ class Bridge:
     def set(self, mhz): self.request('set', mhz=mhz)
     def read(self): return self.request('read')
     def reset(self): self.request('reset')
+    def telemetry(self): return self.request('telemetry')
     def close(self):
+        self.stop.set(); self.heartbeat.join(timeout=6)
         self.file.close(); self.socket.close()
 
 

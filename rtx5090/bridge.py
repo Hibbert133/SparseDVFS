@@ -23,6 +23,7 @@ class Session:
         self.seq = req['seq']; op = req.get('op')
         if op == 'probe': return self.device.probe()
         if op == 'read': return self.device.read()
+        if op == 'telemetry': return self.device.telemetry()
         if op == 'set':
             mhz = req.get('mhz')
             if type(mhz) is not int or mhz not in self.rates: raise ValueError('Unapproved GPU MHz')
@@ -38,8 +39,9 @@ class Session:
 class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = False
-    def __init__(self, address, device, token, log_path):
+    def __init__(self, address, device, token, log_path, allow_apply=True):
         self.device, self.token, self.log_path = device, token, Path(log_path)
+        self.allow_apply = allow_apply
         self.owner = threading.Lock(); self.failed = False
         super().__init__(address, Handler)
     def log(self, row):
@@ -79,8 +81,9 @@ class DeviceLock:
 
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
-        if self.server.failed or not self.server.owner.acquire(blocking=False): return
+        if self.server.failed: return
         session = None
+        owns = False
         try:
             self.connection.settimeout(30)
             session = Session(self.server.device, self.server.token)
@@ -90,6 +93,13 @@ class Handler(socketserver.StreamRequestHandler):
                 if len(line) > 65536: raise ValueError('Oversized request')
                 req = json.loads(line); seq = req.get('seq'); start = time.monotonic_ns()
                 try:
+                    if req.get('op') in ('set', 'reset'):
+                        if not hmac.compare_digest(str(req.get('token', '')), self.server.token) or req.get('uuid') != self.server.device.uuid:
+                            raise ValueError('Authentication/UUID failed')
+                        if not self.server.allow_apply: raise ValueError('Bridge was started without --apply')
+                        if not owns:
+                            owns = self.server.owner.acquire(blocking=False)
+                            if not owns: raise ValueError('Another connection owns GPU control')
                     result = session.handle(req)
                     reply = dict(seq=seq, ok=True, result=result)
                 except Exception as exc:
@@ -104,12 +114,13 @@ class Handler(socketserver.StreamRequestHandler):
                 if session: session.close()
             except Exception as exc:
                 self.server.failed = True; self.server.log(dict(restore_failed=str(exc)))
-            self.server.owner.release()
+            if owns: self.server.owner.release()
 
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--uuid', required=True); p.add_argument('--port', type=int, default=50900)
     p.add_argument('--log', default='bridge.jsonl'); p.add_argument('--mock', action='store_true')
+    p.add_argument('--apply', action='store_true', help='Explicitly permit clock writes from authenticated control clients')
     p.add_argument('--ack-default-auto', action='store_true'); a=p.parse_args()
     token=os.environ.get('SPARSEDVFS_BRIDGE_TOKEN', '')
     if len(token)<32: p.error('Set a random SPARSEDVFS_BRIDGE_TOKEN of at least 32 characters')
@@ -119,7 +130,7 @@ def main():
     # Windows bind owns the port exclusively across bridge processes. WSL must use mirrored networking.
     try:
         device=Mock(uuid=a.uuid) if a.mock else NVML(a.uuid)
-        with Server(('127.0.0.1',a.port),device,token,a.log) as server: server.serve_forever()
+        with Server(('127.0.0.1',a.port),device,token,a.log,allow_apply=a.apply or a.mock) as server: server.serve_forever()
     finally:
         try:
             if device: device.close()

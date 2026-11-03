@@ -89,6 +89,7 @@ def build_plan(profile,profile_file,slowdown=0.05):
 def calibrate(config,out):
     from .controller import Controller
     from .native import environment_record
+    if Path(out).exists(): raise FileExistsError('Use a fresh calibration output; do not overwrite prior evidence')
     keepalive=lambda:None
     if config['backend']!='mock':
         import torch
@@ -116,10 +117,13 @@ def calibrate(config,out):
                             call_us=(returned-start)/1000,matching_readback_us=(matched-start)/1000))
         if not rows: raise ValueError('At least two rates required for calibration')
         ordered=sorted(r['matching_readback_us'] for r in rows)
-        write(out,dict(gpu=config,synthetic=c.backend.synthetic,records=rows,
+        result=dict(gpu=config,synthetic=c.backend.synthetic,records=rows,
             environment=environment_record(),
             switch_us=ordered[min(len(ordered)-1,int(len(ordered)*.95))],
-            measured=True,physical_pll_settle_verified=False,clock_domain='caller_monotonic'))
+            measured=True,physical_pll_settle_verified=False,clock_domain='caller_monotonic')
+    # Publish usable calibration only AFTER Controller.__exit__ has reset successfully.
+    result['restore_returned'] = True
+    write(out,result)
 
 
 def infer(args):

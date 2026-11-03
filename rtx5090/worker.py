@@ -85,7 +85,7 @@ class SparseDVFSWorker(Worker):
                 raise ValueError('Mock calibration cannot authorize real GPU control')
             if os.environ.get('SPARSEDVFS_GPU_UUID'):
                 from .native import environment_record
-                if calibration.get('environment') != environment_record():
+                if not calibration.get('restore_returned') or calibration.get('environment') != environment_record():
                     raise ValueError('Calibration environment/libraries differ; recalibrate in this Conda runtime')
         if config.get('apply') and mode == 'instrumented':
             raise ValueError('Instrumented control must not apply DVFS')
