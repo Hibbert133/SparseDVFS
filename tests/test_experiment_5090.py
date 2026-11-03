@@ -86,7 +86,7 @@ class WindowTests(unittest.TestCase):
                 controlled=job['mode']!='auto';count=job.get('requests',8)
                 return dict(identity=profile['identity'],outputs=['same']*count,tokens=128*count,
                             requests=[dict(elapsed_s=1)]*count,mean_latency_s=1,
-                            energy=dict(energy_j=count*(90 if controlled else 100),seconds=31,uncertainty_fraction=.005),
+                            energy=dict(energy_j=count*(90 if controlled else 100),seconds=31,uncertainty_fraction=.005,method='nvml_total_energy_counter'),
                             real_weights=True,real_cuda=True,synthetic=False,split=job['split'],restoration_ok=True,
                             output_checked=True,frequency_applied=controlled,coverage_complete=controlled,
                             pair_id=job.get('pair_id'),selection_sha256=job.get('selection_sha256'))

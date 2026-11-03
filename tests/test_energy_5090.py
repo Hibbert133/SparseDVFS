@@ -28,7 +28,7 @@ def pairs(ratio=.9,latency=1.01):
                   restoration_ok=True,output_checked=True,frequency_applied=False,
                   identity={'same':'runtime'},outputs=['same-tokens'],tokens=128,
                   mean_latency_s=1,requests=[dict(elapsed_s=1)],
-                  energy=dict(energy_j=100,seconds=31,uncertainty_fraction=.005))
+                  energy=dict(energy_j=100,seconds=31,uncertainty_fraction=.005,method='nvml_total_energy_counter'))
         sparse=copy.deepcopy(auto)
         sparse.update(frequency_applied=True,coverage_complete=True,mean_latency_s=latency,
                       selection_sha256='frozen',requests=[dict(elapsed_s=latency)])
@@ -78,6 +78,8 @@ class EnergyTests(unittest.TestCase):
         with self.assertRaises(ValueError):acceptance(pairs()[:9])
         rows=pairs(); rows[2]=rows[1]
         with self.assertRaisesRegex(ValueError,'Duplicate'): acceptance(rows)
+        rows=pairs(); rows[0]['sparse']['energy']['method']='validated_power_trapezoid'
+        with self.assertRaisesRegex(ValueError,'same verified energy method'): acceptance(rows)
 
     def test_nvml_energy_width_and_power_units(self):
         class Lib:

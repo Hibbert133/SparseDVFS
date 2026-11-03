@@ -190,6 +190,7 @@ def window(a, job):
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     wcfg = dict(gpu=cfg, model=a.model, mode=mode, workload=work, enabled=True,
                 apply=real, granularity='module', out_dir=str(out/'worker'),
+                measurement=dict(interval_s=.1, power_evidence_sha256=digest_json(read(a.power_evidence)) if a.power_evidence else None),
                 fixed_triplet=[0,job.get('mhz',cfg['rates_mhz'][0])*1000000,0],
                 switch_calibrated=bool(a.calibration))
     if a.calibration: wcfg['calibration'] = str(Path(a.calibration).resolve())

@@ -101,6 +101,8 @@ def acceptance(pairs):
         if selection_sha != sparse['selection_sha256']: raise ValueError('Candidate changed across test pairs')
         if auto['identity'] != sparse['identity'] or auto['outputs'] != sparse['outputs'] or auto['tokens'] != sparse['tokens']:
             raise ValueError('Mismatched environment/model/workload/output')
+        if auto['energy'].get('method') not in ('nvml_total_energy_counter','validated_power_trapezoid') or auto['energy'].get('method') != sparse['energy'].get('method'):
+            raise ValueError('Paired measurements must use the same verified energy method')
         if experiment_identity is None: experiment_identity = auto['identity']
         if experiment_identity != auto['identity']: raise ValueError('Experiment identity changed between pairs')
         e0, e1 = (row['energy']['energy_j']/row['tokens'] for row in (auto, sparse))

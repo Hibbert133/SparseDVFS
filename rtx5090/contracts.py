@@ -250,5 +250,6 @@ def identity(config, vllm, torch, cuda, device):
                 vllm=vllm, torch=torch, cuda=cuda, device=device,
                 gpu=config['gpu'], capabilities=capabilities, kernel=platform.release(), sources_sha256=digest_json(sources),
                 granularity=config.get('granularity','module'),
+                measurement=config.get('measurement'),
                 workload=config['workload'], eager=True, max_model_len=4096,
                 gpu_memory_utilization=0.70, cpu='uncontrolled', memory='uncontrolled')
