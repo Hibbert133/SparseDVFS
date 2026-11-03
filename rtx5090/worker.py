@@ -25,6 +25,10 @@ class SparseDVFSWorker(Worker):
             self._sd_failure(exc, 'load_model')
             raise
         validate_engine(self.vllm_config, vllm.__version__, self.use_v2_model_runner)
+        if os.environ.get('SPARSEDVFS_GPU_UUID'):
+            from .native import assert_cuda_uuid, check_vllm_sources
+            assert_cuda_uuid(torch, os.environ['SPARSEDVFS_GPU_UUID'])
+            check_vllm_sources()
         self._sd_schedule, self._sd_fuse, self._sd_cfg = None, None, {}
         self._sd_granularity = 'module'
         self._sd_tracker, self._sd_request, self._sd_enabled = PhaseTracker(), None, False
@@ -52,6 +56,8 @@ class SparseDVFSWorker(Worker):
 
     def _sd_identity(self, config):
         from .contracts import identity
+        if os.environ.get('SPARSEDVFS_GPU_UUID') and config['gpu']['uuid'] != os.environ['SPARSEDVFS_GPU_UUID']:
+            raise ValueError('Inference GPU and controller GPU UUID differ')
         return identity(config, vllm.__version__, torch.__version__, torch.version.cuda, torch.cuda.get_device_name())
 
     def sdvfs_configure(self, config):
@@ -77,6 +83,10 @@ class SparseDVFSWorker(Worker):
                 raise ValueError('Missing matching measured GPU calibration')
             if config.get('apply') and calibration.get('synthetic'):
                 raise ValueError('Mock calibration cannot authorize real GPU control')
+            if os.environ.get('SPARSEDVFS_GPU_UUID'):
+                from .native import environment_record
+                if calibration.get('environment') != environment_record():
+                    raise ValueError('Calibration environment/libraries differ; recalibrate in this Conda runtime')
         if config.get('apply') and mode == 'instrumented':
             raise ValueError('Instrumented control must not apply DVFS')
         granularity = config.get('granularity', 'module')
@@ -152,7 +162,8 @@ class SparseDVFSWorker(Worker):
             raise RuntimeError('Prompt length differs from the profiled workload; use production-native or reprofile')
         if enabled and config['mode'] in ('serial', 'lookahead'):
             w, sampling = config['workload'], context['sampling']
-            if (context['prompt_sha256'] != w['prompt_sha256'] or sampling != dict(
+            allowed = w.get('allowed_prompt_sha256', [w.get('prompt_sha256')])
+            if (context['prompt_sha256'] not in allowed or sampling != dict(
                     temperature=0.0, seed=0, max_tokens=w['output_tokens'],
                     min_tokens=w['output_tokens'], ignore_eos=True)):
                 raise RuntimeError('Repro service requires the profiled token IDs and greedy/fixed-length sampling settings')

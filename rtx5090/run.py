@@ -27,12 +27,12 @@ def download(path):
     verify_model(root,hashes=True)
 
 
-def workload():
+def workload(model='/model', output_tokens=128):
     from transformers import AutoTokenizer
-    tokenizer=AutoTokenizer.from_pretrained('/model',local_files_only=True)
+    tokenizer=AutoTokenizer.from_pretrained(model,local_files_only=True)
     seed=tokenizer.encode('Explain why frequency scheduling needs measured execution boundaries.',add_special_tokens=False)
     ids=(seed*512)[:512]
-    return dict(input_tokens=512,output_tokens=32,input_token_ids=ids,prompt_sha256=digest_json(ids),
+    return dict(input_tokens=512,output_tokens=output_tokens,input_token_ids=ids,prompt_sha256=digest_json(ids),
                 temperature=0.0,seed=0,ignore_eos=True,add_special_tokens=False,warmups=2)
 
 
@@ -88,6 +88,7 @@ def build_plan(profile,profile_file,slowdown=0.05):
 
 def calibrate(config,out):
     from .controller import Controller
+    from .native import environment_record
     keepalive=lambda:None
     if config['backend']!='mock':
         import torch
@@ -116,20 +117,21 @@ def calibrate(config,out):
         if not rows: raise ValueError('At least two rates required for calibration')
         ordered=sorted(r['matching_readback_us'] for r in rows)
         write(out,dict(gpu=config,synthetic=c.backend.synthetic,records=rows,
+            environment=environment_record(),
             switch_us=ordered[min(len(ordered)-1,int(len(ordered)*.95))],
             measured=True,physical_pll_settle_verified=False,clock_domain='caller_monotonic'))
 
 
 def infer(args):
     from vllm import LLM
-    verify_model('/model',hashes=True)
-    data=workload(); out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
+    verify_model(args.model,hashes=True)
+    data=workload(args.model); out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     native=args.command=='baseline'
     gpu=read(args.gpu) if not native else None
     real=gpu is not None and gpu['backend']!='mock'
     if real and not args.apply: raise ValueError('Real NVML requires --apply')
     if real: os.environ['SPARSEDVFS_APPLY']='1'
-    llm=LLM(**engine_args(custom=not native))
+    llm=LLM(**engine_args(args.model,custom=not native))
     if native:
         for _ in range(2): generate(llm,data)
         rows=[generate(llm,data) for _ in range(args.repeat)]
@@ -148,7 +150,7 @@ def infer(args):
     rates=gpu['rates_mhz'] if args.command=='profile' else [None]
     for rate in rates:
         mode='fixed' if rate is not None else args.mode
-        cfg=dict(mode=mode,gpu=gpu,enabled=True,apply=real,workload=public(data),granularity='module',
+        cfg=dict(mode=mode,gpu=gpu,model=args.model,enabled=True,apply=real,workload=public(data),granularity='module',
                  out_dir=str((out/str(rate or mode)).resolve()),fixed_triplet=[0,(rate or gpu['rates_mhz'][0])*1000000,0],
                  switch_calibrated=bool(calibration and calibration.get('measured')))
         if args.calibration: cfg['calibration']=str(Path(args.calibration).resolve())
@@ -187,6 +189,7 @@ def infer(args):
 def main():
     p=argparse.ArgumentParser(); p.add_argument('command',choices=['download','probe','calibrate','baseline','profile','plan','run'])
     p.add_argument('--out',default='/results'); p.add_argument('--gpu'); p.add_argument('--apply',action='store_true')
+    p.add_argument('--model',default=os.environ.get('SPARSEDVFS_MODEL','/model'))
     p.add_argument('--baseline'); p.add_argument('--calibration'); p.add_argument('--profile'); p.add_argument('--plan')
     p.add_argument('--mode',choices=['instrumented','fixed','serial','lookahead'],default='serial')
     p.add_argument('--repeat',type=int,default=3); p.add_argument('--slowdown',type=float,default=.05)

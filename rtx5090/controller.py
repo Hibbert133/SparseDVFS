@@ -37,7 +37,7 @@ class Controller(FUSE):
         self.trace_path = self.directory/'fuse_trace.csv'
         config_path = self.directory/'fuse.conf'
         config_path.write_text('gpu_rates='+' '.join(str(f*1000000) for f in self.rates)+'\nlog_path='+str(self.trace_path.resolve())+'\n')
-        library = library or Path(__file__).resolve().parent.parent/'build/libfuse_dvfs.so'
+        library = library or Path(os.environ.get('SPARSEDVFS_LIBRARY_DIR', str(Path(__file__).resolve().parent.parent/'build')))/'libfuse_dvfs.so'
         self.library_path = Path(library).resolve()
         self.lib = ctypes.CDLL(str(self.library_path))
         try:

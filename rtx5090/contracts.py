@@ -9,7 +9,7 @@ IMAGE = 'vllm/vllm-openai@' + IMAGE_DIGEST
 MODEL_ID = 'cyankiwi/Qwen3.5-27B-AWQ-4bit'
 REVISION = '9d8d63632afafe90bdfcb70164d3e2a0955619f7'
 WORKER = 'rtx5090.worker.SparseDVFSWorker'
-PROTOCOL = 'rtx5090_v1_vllm019_int4_gpu_only'
+PROTOCOL = 'rtx5090_v2_vllm_v1_int4_gpu_only'
 UNITS = ['embed'] + [f'layer.{i}' for i in range(64)] + ['norm', 'logits', 'sample']
 MODES = ('instrumented', 'fixed', 'serial', 'lookahead')
 
@@ -50,8 +50,8 @@ def server_args(*, custom=True, production=False, port=8000):
 
 
 def validate_engine(config, version, use_v2=False):
-    if version.split('+')[0] != '0.19.0':
-        raise RuntimeError(f'Expected vLLM 0.19.0; found {version}')
+    if version.split('+')[0] not in ('0.19.0', '0.32.0'):
+        raise RuntimeError(f'Expected audited vLLM 0.19.0 or 0.32.0 V1; found {version}')
     if use_v2:
         raise RuntimeError('Set VLLM_USE_V2_MODEL_RUNNER=0; only the pinned V1 runner is supported')
     p, m, s, cache = (config.parallel_config, config.model_config,
@@ -232,6 +232,8 @@ def verify_model(path, hashes=False):
 
 def identity(config, vllm, torch, cuda, device):
     import platform
+    import os
+    from .native import environment_record
     from .backends import backend
     lock = json.loads((Path(__file__).resolve().parents[1]/'configs/5090.lock.json').read_text())
     b=backend(config['gpu'])
@@ -240,10 +242,11 @@ def identity(config, vllm, torch, cuda, device):
     finally: b.close()
     root=Path(__file__).resolve().parents[1]
     sources={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
-             for folder in ('rtx5090','cpp') for p in (root/folder).glob('*') if p.suffix in ('.py','.cpp','.h')}
+             for folder in ('rtx5090','cpp','sparsedvfs','sparsedvfs_vllm') for p in (root/folder).glob('*') if p.suffix in ('.py','.cpp','.h')}
     return dict(backend=PROTOCOL, model=MODEL_ID, revision=REVISION,
-                model_manifest_sha256=verify_model('/model')['manifest_sha256'],
-                quantization_sha256=digest_json(lock['quantization']), image=lock['image'],
+                model_manifest_sha256=verify_model(config.get('model', os.environ.get('SPARSEDVFS_MODEL', '/model')))['manifest_sha256'],
+                quantization_sha256=digest_json(lock['quantization']),
+                runtime=environment_record(),
                 vllm=vllm, torch=torch, cuda=cuda, device=device,
                 gpu=config['gpu'], capabilities=capabilities, kernel=platform.release(), sources_sha256=digest_json(sources),
                 granularity=config.get('granularity','module'),
