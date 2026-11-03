@@ -61,16 +61,16 @@
     "sparsedvfs_vllm/spans.py": "0fda916c4b385c0d865f9eeb4b6d201fb42bff61f2bf64b357da33da329f2dbd",
     "sparsedvfs_vllm/runtime_info.py": "9d15db284d91c88a72c1012472e999bbf3cf651a7e3d397b5663929c4a1a0105",
     "rtx5090/native.py": "0457388e87877c213bbb666968aa4dcbe10b56cd57bc558068822b092666234c",
-    "rtx5090/contracts.py": "02fcd3751ffa303e36c51e83c2901566a88d6128eb39d46acf60e3dc17780e09",
+    "rtx5090/contracts.py": "734b6a107b88f4a31baf1f4d952096fdfd8ff6627cd54c2cd1479c8dafd60e92",
     "rtx5090/conda.py": "cfb87e8c3be9366558472f7f0ba1600e1d2cdf711be5dad5570a26ef182b184c",
     "rtx5090/controller.py": "c220d83c7a0b608d2cc9f77e7bd4308d93ea1bea95e9264649dfa9d0306c69a0",
     "rtx5090/run.py": "c54e8bb0bb0d2333c70a6dc58a06386ca9d5747bd53afe8fd47c79c4aede3844",
-    "rtx5090/energy.py": "3a69be076886e017a5ab2b10063c45aff7937804db31e1d5f4e95eaf88d0f1ec",
+    "rtx5090/energy.py": "f4e0d6d67f523a7e7dcf5c4e1683386e67f9411dce38a98a95075899414b0894",
     "rtx5090/bridge.py": "aafff90ba1dae527dfc835d1ea01ccf19e5500f6a38f857f89dde263ba9c386c",
     "rtx5090/backends.py": "25a060a2f2e48ba65ab1f9e32613f3b19392c4baae590b84600b39fb4a5b9c4b",
     "rtx5090/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "rtx5090/simulate.py": "9fccad4432d9840d7beab262ca717e9b21dc2850d1deaeee83b7ee0141f26664",
-    "rtx5090/experiment.py": "7c637184fe3591d3c13eb8f0806dedae367b32d481df87dedec87f4347d2da86",
+    "rtx5090/experiment.py": "92c48edb27ea7980afd16e8076d0a3e3c4de130a9517e87dada5bd21e01a1f65",
     "rtx5090/worker.py": "0837f25599c96863613630aecfeb4cb99665dea9fbe215e14aef2f72554d2547",
     "rtx5090/planning.py": "4961c4a0b0ecbafa36eec1dccb41d7d56906400f39a1a2897c072867ad7a3abd",
     "tests/test_core.py": "4ddb7d5a677a14c76fdc07f4f33d37d241cd03bb7bf1f185495d2bfcd320f40e",
@@ -85,11 +85,11 @@
     "tests/test_v4_paper.py": "60ec912bb9e22ce6f7987cf7cecb32c01b69f21d7bb0cdfdfcd5ba3f920af80e",
     "tests/test_fuse.py": "e1b4e73d1b96c998d79e14adfe1816de64e3596d07b27a96aec27139da9c58b9",
     "tests/test_v5_operators.py": "85e5a024ff481c2f70b5a1f88e66d599d01204fc24bd7b7fdf62ef3d672ffdda",
-    "tests/test_energy_5090.py": "3165e159bd7ed4cfe7d23f62e7b1920e32a827dabc897e115965d3a35f291936",
+    "tests/test_energy_5090.py": "d805b535a5d691fe4172655ccd8c7f7b0cef40bc294aa48a121dd3412a1d643c",
     "tests/test_v3_workflow.py": "4e14c286f51c28642ff1d2090610b6d92bab541efc1997e46859a46f2665cd26",
     "tests/test_v5_calibration.py": "fc9e1d5f1b7b59ef09761eaa02890d84ea8dbc8b12261919333121f365107292",
     "tests/test_v3_contracts.py": "ad33142bc9fd86980903ae37a73f857e582367dbf702d3a4e04c8ef9fc45c04b",
     "tests/test_v2_policy.py": "dc023be3addcfd44ae67123ea9c7fdd66e18a8cbc97c05a329607ef2faf8d824",
-    "tests/test_experiment_5090.py": "f5e0f08bd18271fd5bc687e119418cb6c8b196ced8647d9267cc97dae804f966"
+    "tests/test_experiment_5090.py": "1291157dd23f06fecb70b61a3bd50d693d156d1fb025889381083c164b5d1778"
   }
 }

@@ -188,6 +188,6 @@ test_unclosed_block_cannot_finalize_or_start_next_step (test_virtual_chain.Virtu
 test_wrong_unit_order_is_rejected (test_virtual_chain.VirtualChainTests.test_wrong_unit_order_is_rejected) ... ok
 
 ----------------------------------------------------------------------
-Ran 188 tests in 3.087s
+Ran 188 tests in 3.008s
 
 OK (skipped=3)

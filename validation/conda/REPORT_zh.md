@@ -2,7 +2,7 @@
 
 验证日期：2026-11-03。**没有实测 5090 的节能或加速结论。**
 
-实现提交：`2334cb65a76a7585b97472260e9ec4dabf57af6a`。兼容性基础另提交为 `25d1fc33c7e3b68a0d472df360058f0690aee0a1`。后续报告/打包提交不改变运行实现。
+实现提交：`28d346248aa1929085d11bc1c1adff75ba296438`。兼容性基础另提交为 `25d1fc33c7e3b68a0d472df360058f0690aee0a1`。后续报告/打包提交不改变运行实现。
 
 ## 实际执行结果
 
@@ -13,11 +13,11 @@
 | 本地 Windows 实现主机，Python 3.14.5 | Python/mock 回归、入口解析、诊断命令 | 188 项：173 通过；12 Linux native + 3 CUDA 跳过 |
 | 用户 WSL2 / RTX 5090 | 未连接到该机器，未运行实机实验 | 待用户执行手动指南 |
 
-GitHub CI：[run 41569581167，success](https://github.com/Hibbert133/SparseDVFS/actions/runs/41569581167)。CI 实际运行 `python -B -m rtx5090.conda cpu-test --out runs/ci`，并验证必需 CPU/native 项未跳过。
+GitHub CI：[run 41570128788，success](https://github.com/Hibbert133/SparseDVFS/actions/runs/41570128788)。CI 实际运行 `python -B -m rtx5090.conda cpu-test --out runs/ci`，并验证必需 CPU/native 项未跳过。
 
-CI 日志与源码哈希在 [ci/tests.txt](ci/tests.txt)、[ci/summary.json](ci/summary.json)。其中包含 **12 项真实 C++ integration 测试**。已逐个核对 summary 中的源码 SHA256，全部与交付实现一致。GitHub artifact SHA256：`88f3640bfdb65bf7d4c881fe6bf572d2579f26f11136f6c8bff25d5d028b477f`。
+CI 日志与源码哈希在 [ci/tests.txt](ci/tests.txt)、[ci/summary.json](ci/summary.json)。其中包含 **12 项真实 C++ integration 测试**。已逐个核对 summary 中的源码 SHA256，全部与交付实现一致。GitHub artifact SHA256：`79b20b56c190130cd4ddef763a696e5fc9b322857b1dd5b06c2c6f3e6ae8525d`。
 
-QEMU 日志在 [qemu/tests.txt](qemu/tests.txt)、[qemu/summary.json](qemu/summary.json) 和 [编译日志](qemu/compiler.txt)。QEMU 快照比最终实现少两处收尾修改：Conda CPU 入口隐藏 CUDA 设备/检查跳过项，以及单独保存 measured trace。最终两处修改已由上述 Linux CI 验证。QEMU 运行真实 FUSE C++，CUDA、模型与 NVML 是替身；没有 GPU 直通。
+QEMU 日志在 [qemu/tests.txt](qemu/tests.txt)、[qemu/summary.json](qemu/summary.json) 和 [编译日志](qemu/compiler.txt)。QEMU 快照位于收尾修改之前：最终增加了 Conda CPU 入口隐藏 CUDA 设备/检查跳过项、单独保存 measured trace、计量证据身份绑定及两臂测量方式一致性拒绝测试。这些最终修改已由上述 Linux CI 验证。QEMU 运行真实 FUSE C++，CUDA、模型与 NVML 是替身；没有 GPU 直通。
 
 原验证 runner 的 `date` 字段沿用历史基线日期；本次实际执行时间以 CI run 时间及本报告为准。没有改写旧四个 `validation/` 结果文件。原有 C++ misleading-indentation/unused-function warning 仍保留在原始编译日志中，不被当作真实硬件验收。
 
