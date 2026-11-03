@@ -2,7 +2,7 @@
 
 本阶段只做“算子测时 → 参数估计 → 公式预测 → 实测核对”。不加载 Qwen，不需要真实模型权重、vLLM worker 或 FUSE 动态库，不做功耗拟合、分块、动态调频或收益对照。固定频率只用于离线标定。
 
-当前交付是可运行工具与本机 CPU 检查；尚未在目标 5090 上采样。下面的 `doctor → collect → fit → validate` 均为已实现入口。
+2026-11-03 目标机用户反馈：`doctor` 已 ready，2250 MHz 的 12 组完成；2527 MHz 首组在正式测时前读回 2407 MHz，采集失败，已请求 reset 且调用返回成功，物理恢复未验证。当前尚无完整标定或预测结论。下面的 `doctor → collect → fit → validate` 均为已实现入口；此次失败的诊断与重试见 [读回诊断说明](EQ1_CLOCK_DIAGNOSTICS_zh.md)。
 
 ## 依据与实现选择
 
@@ -27,7 +27,7 @@
 
 代码通过 `https://github.com/Hibbert133/SparseDVFS` 的 `5090` 分支管理：开发侧提交并推送，目标机器 fetch 后快进更新。同一份 Windows/WSL 共享仓库只需要更新一次。
 
-先在自己的服务终端停止 vLLM；如果旧 Windows bridge 仍运行，也先在它的终端按 Ctrl+C，后面重新启动以加载新增的显存读回字段。
+先在自己的服务终端停止 vLLM；如果旧 Windows bridge 仍运行，也先在它的终端按 Ctrl+C，后面重新启动以加载新增的诊断字段。
 
 在 **WSL Bash** 执行：
 
@@ -40,7 +40,7 @@ git merge --ff-only origin/5090
 git log -1 --oneline
 ```
 
-`git fetch` 只更新远端引用，后面的 `git merge --ff-only origin/5090` 才更新当前代码。遇到本地修改冲突或分支分叉时停止，保留现场，不使用强制覆盖。此次更新包含独立工具、显存读回字段、必要测试与本指南，无需编译 CUDA/FUSE 或重新安装 Python 包。
+`git fetch` 只更新远端引用，后面的 `git merge --ff-only origin/5090` 才更新当前代码。遇到本地修改冲突或分支分叉时停止，保留现场，不使用强制覆盖。此次更新补足失败读回、阶段和诊断字段，并新增显式可选的有界检查，无需编译 CUDA/FUSE 或重新安装 Python 包。
 
 可选的纯 CPU 入口检查：
 
@@ -56,7 +56,7 @@ python -B -m rtx5090.performance --help
 
 当前 bridge 固定监听 Windows 的 `127.0.0.1:50900`，不支持 `--host`。WSL 需使用镜像网络才能按本文地址访问它；不能只把客户端地址改成 NAT 网关。参见[微软镜像网络说明](https://learn.microsoft.com/windows/wsl/networking#mirrored-mode-networking)。
 
-2026-11-03 目标机用户反馈：WSL 2.6.0.0、Windows build 26100.6584，最初无 `.wslconfig`；Windows 已监听但 WSL 报 `Connection refused`。按下述方式启用镜像网络并重启后，用户确认 TCP 连接成功。这仅证明端口可达，尚不证明 token 认证、NVML 查询、真实锁频或恢复通过。
+2026-11-03 目标机用户反馈：WSL 2.6.0.0、Windows build 26100.6584，最初无 `.wslconfig`；Windows 已监听但 WSL 报 `Connection refused`。启用镜像网络并重启后，TCP 连接及认证 `doctor` 均已通过，不需要重复改网络。这不代表两个频点的完整标定或物理恢复通过。
 
 仅在连接检查失败、确认需要切换网络时执行。此操作改变该 Windows 用户下所有 WSL2 发行版的网络模式；`wsl --shutdown` 会停止所有 WSL 实例。先保存工作并正常停止自己的任务，不中断其他用户任务。已启用镜像网络的机器无需重复配置。
 
@@ -78,7 +78,7 @@ wsl --shutdown
 wsl
 ```
 
-如需回退，只移除本次新增的设置，保留其他配置，并在保存工作后再次重启 WSL。重启后重新激活 Conda、核实 `/tmp/triton-360-test` 仍存在，并重设下面的环境变量、GPU UUID、输出目录与 token。Windows bridge 进程不因 WSL 重启而自动重启，仍使用原 token。
+如需回退，只移除本次新增的设置，保留其他配置，并在保存工作后再次重启 WSL。重启后重新激活 Conda、核实持久目录 `/mnt/d/s00958243/triton-360`，并重设下面的环境变量、GPU UUID、输出目录与 token。此前 `/tmp/triton-360-test` 已因重启丢失，用户已改用持久目录。Windows bridge 进程不因 WSL 重启而自动重启，仍使用原 token。
 
 ### 2.2 在 Windows 管理员窗口启动服务
 
@@ -136,9 +136,9 @@ Get-NetTCPConnection -LocalPort 50900 -State Listen |
 conda activate vllm-qwen
 cd /mnt/d/s00958243/SparseDVFS
 
-export PYTHONPATH="/tmp/triton-360-test:${PYTHONPATH:-}"
-export TRITON_CACHE_DIR=/tmp/triton360-vllm-cache
-export SPARSEDVFS_TRITON_PATH=/tmp/triton-360-test
+export PYTHONPATH="/mnt/d/s00958243/triton-360:${PYTHONPATH:-}"
+export TRITON_CACHE_DIR=/mnt/d/s00958243/triton360-cache
+export SPARSEDVFS_TRITON_PATH=/mnt/d/s00958243/triton-360
 
 PERF_GPU_UUID=GPU-22d1cd22-d198-45c4-2b54-974484026ab5
 PERF_OUT="$PWD/runs/eq1-$(date +%Y%m%d-%H%M%S)"
@@ -160,7 +160,7 @@ python -B -m rtx5090.performance doctor --gpu-uuid "$PERF_GPU_UUID" --backend br
 - `Connection refused`：连接尚未建立，发生在 token 验证之前；按 2.3 检查监听和网络。超时也先检查连接路径，不自动修改防火墙或驱动。
 - 认证失败：只在自己的 Windows/WSL 终端间核对同一个 token；Windows 启动 bridge 后更改环境变量不会更新已运行进程的 token。
 - `Evidence already exists`：失败的 doctor 也会保留 `doctor.json`，不要删除或覆盖。修复当前错误后执行 `PERF_OUT="$PWD/runs/eq1-$(date +%Y%m%d-%H%M%S)"`，等待至少一秒避免同名，再重试 doctor；成功后 collect/fit/validate 沿用该目录。
-- CUDA/UUID/Triton 路径错误：核对当前 Conda 及独立 Triton 路径；不覆盖已安装环境。`/tmp` 路径在重启后可能需要重新核实。
+- CUDA/UUID/Triton 路径错误：核对当前 Conda 及上述持久目录，检查实际导入路径；不覆盖已安装环境或重用旧临时路径。
 
 ## 4．采集两个固定频率下的数据
 
@@ -176,6 +176,8 @@ python -B -m rtx5090.performance collect --gpu-uuid "$PERF_GPU_UUID" --backend b
 2. 再预热 5 次；独立测 5 次 CUDA Event 时间，转为秒后保留全部样本。
 
 每个流程前后读取核心、显存频率和温度；核心偏差超过 15 MHz、显存改变或读回缺失时停止。15 MHz 是本阶段的读回容差，不是论文参数。
+
+默认仍是每个阶段一次严格读回。失败快照现在也保存到 `snapshots[阶段]` 和 `clock_observations`，包括原始频率、阶段、查询往返耗时及可用的只读诊断。若需评估额外稳定性检查，可以显式添加 `--clock-stability-timeout-s 5`：仅在两次正式测时**之前**，要求连续 3 次读回满足原容差；重查前执行一次同形状算子并同步，重查间隔 0.1 秒。额外操作不计入 5 次预热或 5 次正式样本，但会改变负载历史，因此记录为相对作者流程的实现差异。测时后的检查仍一次失败即停止；详见 [读回诊断说明](EQ1_CLOCK_DIAGNOSTICS_zh.md)。
 
 | 用途 | GEMM 方阵边长 | 加法每个缓冲区 |
 | --- | --- | --- |

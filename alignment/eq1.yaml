@@ -1,6 +1,6 @@
 part: '01 — Timeline-based Performance Model'
 reviewed_at: '2026-11-03'
-status: '独立 Eq1 工具已实现，34 项本机检查通过；目标 GPU 参数与预测误差待验证'
+status: '已补足失败读回与可选有界检查；目标机 doctor ready，2250 MHz 完成 12 组，2527 MHz 测时前失败；完整标定待重采'
 
 paper:
   version: 'arXiv:2603.21908v1'
@@ -32,6 +32,7 @@ reviewed_code:
   active_5090_candidate_path: 'rtx5090/planning.py:7 — candidate，当前使用实测延迟表'
   standalone_entry: 'rtx5090/performance.py — doctor / collect / fit / validate'
   implementation_state: '实现以所列提交为基线；通过 origin/5090 的 Git 提交与推送管理，目标机器 fetch 后快进更新'
+  diagnostics_parent_commit: 'bf8f842 — 镜像网络操作说明；诊断修复以当前文件所在提交为准'
 
 author_reference:
   repository: 'https://github.com/ziyangzhang96/SparseDVFS'
@@ -56,6 +57,11 @@ stage_choices:
   calibration_shapes: 'GEMM 1024/2048/4096；加法每缓冲区 8/64 MiB'
   validation_shapes: 'GEMM 1536/3072/6144；加法每缓冲区 16/128 MiB，不参与拟合'
   readback: '正式测时前后核心误差不超过 15 MHz，显存同档；失败停止并尝试恢复'
+  clock_diagnostics: '保存失败快照/阶段/全部检查尝试；同步与查询间隔、往返和各字段时间分域记录；Graphics 改为优先查询，字段增加及顺序变化均影响检查间隙，不证明根因'
+  optional_precheck: '默认 0 关闭；显式 --clock-stability-timeout-s 5 时，每次测时前最多 5 秒，连续 3 次读回达标；重查间隔 0.1 秒并额外执行一次同形状算子'
+  precheck_difference: '额外算子不计入 5 次预热或正式时间，但改变负载历史；相对作者固定等待的移植选择；测时后严格单次检查，不补救已失效采样'
+  timeout_limit: '不强行中断已经进入的 CUDA/驱动/传输调用；越界结果不能使检查通过'
+  diagnostic_fields: 'Graphics/SM/显存频率、可用限频位掩码、P-state、温度、利用率、只读功率/上限；不用于功耗拟合，不证明历史因果或遥测刷新'
   provenance: '上述算子、形状、逻辑流量与估计器均是本阶段选择，不归为作者参数'
 
 findings:
@@ -84,25 +90,50 @@ verification:
   executed: true
   passed: 3
   failed: 0
-  hardware_calibration_executed: false
+  hardware_calibration_executed: true
+  hardware_calibration_completed: false
   real_gpu_prediction_accuracy_verified: false
   bridge_connectivity:
     reported_at: '2026-11-03'
-    evidence: '目标机用户反馈：启用镜像网络并重启 WSL 后，socket.create_connection 到 127.0.0.1:50900 显示连接成功'
+    evidence: '目标机用户反馈：镜像网络重启后连接成功，performance doctor 返回 status: ready，认证与 UUID 通过'
     environment: 'WSL 2.6.0.0；Windows build 26100.6584；此前无 .wslconfig'
     tcp_reachable_user_reported: true
-    authenticated_doctor_verified: false
+    authenticated_doctor_verified: true
     clock_set_and_restore_verified: false
+  target_partial_collection:
+    source: '2026-11-03 用户转述目标机日志；开发侧未访问硬件或原始目录'
+    completed_rate_mhz: 2250
+    completed_groups: 12
+    failed_record: '2527/gemm_8192'
+    failure_phase: 'before_wall，设频后等 0.5 秒，预热 5 次并同步后'
+    requested_mhz: 2527
+    observed_mhz: 2407
+    formal_samples_in_failed_group: 0
+    old_failed_snapshots: '空；旧 ClockGuard 在返回前抛异常，无法补造原始遥测'
+    reset_attempted: true
+    reset_returned: true
+    physical_restore_verified: false
+    root_cause: '未确定；锁频未达到/查询间隙变化/遥测更新延迟均待证实'
+    exit_readback: '用户报告：驱动 576.80/CUDA 12.9；Graphics/SM 2512 MHz、显存 14001 MHz、37℃、约 67 W、上限 600 W；当前限频原因未激活'
+    evidence_limit: '退出后状态不能解释失败瞬间；SW Power Capping 1317512 us 为累计值，无前后差值，不能归因'
+    treatment: '保留旧失败目录，不拟合；修复后新目录 doctor/collect，不拼接旧 2250 样本'
+  triton_environment:
+    source: '2026-11-03 用户确认持久目录已安装，当前 doctor ready'
+    imported_version: '3.6.0'
+    path: '/mnt/d/s00958243/triton-360'
+    cache: '/mnt/d/s00958243/triton360-cache'
+    superseded_path: '/tmp/triton-360-test；WSL 重启后已丢失'
   implementation_checks:
     executed: true
-    tests_run: 34
-    passed: 34
+    tests_run: 45
+    passed: 45
     skipped: 0
-    new_eq1_tests: 22
-    evidence: 'outputs/eq1-test-results.json 与 outputs/eq1-test-log.txt（交接目录）'
+    eq1_tests: 33
+    prior_tests_run: 34
+    evidence: 'validation/eq1_clock_checks/REPORT_zh.md；outputs/eq1-clock-check-results.json 和 outputs/eq1-clock-check-log.txt（交接目录）'
     scope: '本机 CPU 的合成数值、测时 API 替身、后端与传输回归；无目标 GPU 测量'
 
 next_small_step:
-  focus: '目标机 TCP 已连通；重新设置 WSL 环境与同一 token，使用新输出目录运行 doctor，成功后再 collect'
+  focus: 'fetch 快进更新，重启 Windows bridge，复用持久 Triton；新目录 doctor/默认 collect，先取得故障阶段证据；可选有界模式另建目录并声明差异'
   deliverable: '按 PERFORMANCE_EQ1_zh.md 依次取得真实采样、参数文件与预测核对报告'
   completion_rule: '读回、恢复与参数来源明确；如实报告误差，不宣称完整三域或稀疏机制已复现'

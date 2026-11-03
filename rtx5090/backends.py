@@ -73,29 +73,49 @@ class NVML:
         self._call('nvmlDeviceSetGpuLockedClocks', self.handle, C.c_uint(mhz), C.c_uint(mhz))
     def reset(self): self._call('nvmlDeviceResetGpuLockedClocks', self.handle)
     def telemetry(self):
-        result = dict(uuid=self.uuid, synthetic=False, timestamp_ns=time.monotonic_ns(), errors={})
+        result = dict(uuid=self.uuid, synthetic=False, timestamp_ns=time.monotonic_ns(),
+                      errors={}, field_query_times_ns={})
+        def query(key, name, kind, prefix=(), field=None):
+            value = kind()
+            started = time.monotonic_ns()
+            try:
+                self._call(name, self.handle, *prefix, C.byref(value))
+                result[key] = getattr(value, field) if field else value.value
+                return True
+            except (RuntimeError, AttributeError) as exc:
+                result[key] = None
+                result['errors'][key] = str(exc)
+                return False
+            finally:
+                result['field_query_times_ns'][key] = dict(start=started, end=time.monotonic_ns())
+        # Read graphics first to minimize the sync-to-core-query gap. Queries
+        # are sequential, not an atomic hardware snapshot; times use this host.
         for key, name, kind, prefix in (
+            ('clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(0),)),
+            ('sm_clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(1),)),
+            ('memory_clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(2),)),
             ('energy_mj', 'nvmlDeviceGetTotalEnergyConsumption', C.c_ulonglong, ()),
             ('power_mw', 'nvmlDeviceGetPowerUsage', C.c_uint, ()),
             ('temperature_c', 'nvmlDeviceGetTemperature', C.c_uint, (C.c_uint(0),)),
-            ('memory_clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(2),)),
-            ('clock_mhz', 'nvmlDeviceGetClockInfo', C.c_uint, (C.c_uint(0),))):
-            value = kind()
-            try:
-                self._call(name, self.handle, *prefix, C.byref(value)); result[key] = value.value
-            except (RuntimeError, AttributeError) as exc:
-                result[key] = None; result['errors'][key] = str(exc)
+            ('power_limit_mw', 'nvmlDeviceGetPowerManagementLimit', C.c_uint, ()),
+            ('performance_state', 'nvmlDeviceGetPerformanceState', C.c_uint, ())):
+            query(key, name, kind, prefix)
+        # Old drivers may expose only the deprecated spelling. Neither query
+        # changes clocks; unsupported fields remain null with the real error.
+        result['clock_event_reasons_api'] = None
+        for name in ('nvmlDeviceGetCurrentClocksEventReasons',
+                     'nvmlDeviceGetCurrentClocksThrottleReasons'):
+            if query('clock_event_reasons', name, C.c_ulonglong):
+                result['clock_event_reasons_api'] = name
+                break
+            result['errors'][name] = result['errors'].pop('clock_event_reasons')
         class Util(C.Structure):
             _fields_ = [('gpu', C.c_uint), ('memory', C.c_uint)]
         class Memory(C.Structure):
             _fields_ = [('total', C.c_ulonglong), ('free', C.c_ulonglong), ('used', C.c_ulonglong)]
         for key, name, kind, field in (('utilization_pct', 'nvmlDeviceGetUtilizationRates', Util, 'gpu'),
                                       ('memory_used_bytes', 'nvmlDeviceGetMemoryInfo', Memory, 'used')):
-            value = kind()
-            try:
-                self._call(name, self.handle, C.byref(value)); result[key] = getattr(value, field)
-            except (RuntimeError, AttributeError) as exc:
-                result[key] = None; result['errors'][key] = str(exc)
+            query(key, name, kind, field=field)
         return result
     def close(self): self._call('nvmlShutdown')
 

@@ -30,6 +30,11 @@ AUTHOR_COMMIT = 'c524c51aac552fd16bec5743b1fb95309b46347b'
 TRAFFIC = 'logical_tensor_bytes_not_measured_DRAM'
 TIMING = 'synchronized_host_wall_s; separate_CUDA_event_capacity_pass'
 POLICY = 'one_global_nonnegative_median_training_residual'
+CLOCK_CHECK_POLICY = 'phase_readbacks_v2_optional_bounded_precheck'
+PRECHECK_PHASES = {'before_wall', 'before_cuda'}
+CHECK_PHASES = PRECHECK_PHASES | {'after_wall', 'after_cuda'}
+STABLE_READS = 3
+POLL_SECONDS = 0.1
 MIB = 1024 * 1024
 PARAMETER_KEYS = {'p_peak_flops_by_gpu_mhz', 'b_mem_logical_Bps',
                   't_overhead_s', 's_comp', 's_mem'}
@@ -64,10 +69,13 @@ def fresh(out, *names):
     return out
 
 
-def safe_error(exc):
-    message = f'{type(exc).__name__}: {exc}'
+def redact(message):
     token = os.environ.get('SPARSEDVFS_BRIDGE_TOKEN')
     return message.replace(token, '[REDACTED]') if token else message
+
+
+def safe_error(exc):
+    return redact(f'{type(exc).__name__}: {exc}')
 
 
 def number(value, name, zero=False):
@@ -118,6 +126,7 @@ def settings(args):
         raise ValueError('--reference-mhz must be in --rates-mhz')
     if args.warmup < 1 or args.repeat < 1:
         raise ValueError('--warmup and --repeat must be positive')
+    number(args.clock_stability_timeout_s, '--clock-stability-timeout-s', zero=True)
     return dict(backend=args.backend, uuid=args.gpu_uuid, rates_mhz=list(rates),
                 default_auto_ack=True, host=args.bridge_host, port=args.bridge_port)
 
@@ -130,7 +139,14 @@ def protocol(args):
                 memory_policy='unchanged_system_managed; require_one_observed_clock',
                 scope='single_GPU_core_frequency_slice', seed=0,
                 author_commit=AUTHOR_COMMIT,
-                author_reference_defaults=(args.warmup == 5 and args.repeat == 5))
+                author_reference_defaults=(args.warmup == 5 and args.repeat == 5),
+                clock_check_policy=CLOCK_CHECK_POLICY,
+                clock_stability=dict(timeout_s=args.clock_stability_timeout_s,
+                    required_consecutive_reads=STABLE_READS if args.clock_stability_timeout_s else 1,
+                    interval_s=POLL_SECONDS if args.clock_stability_timeout_s else 0,
+                    extra_operation_before_recheck=bool(args.clock_stability_timeout_s),
+                    scope='pre_measurement_only; post_measurement_single_strict_read',
+                    author_flow_deviation=bool(args.clock_stability_timeout_s)))
 
 
 def capabilities(device, expected, rates):
@@ -144,28 +160,130 @@ def capabilities(device, expected, rates):
     return value
 
 
-class ClockGuard:
-    def __init__(self, device, uuid, memory_mhz=None):
-        self.device, self.uuid, self.memory_mhz = device, uuid, memory_mhz
+class ClockReadbackError(RuntimeError):
+    def __init__(self, message, kind, snapshot):
+        super().__init__(message)
+        self.kind, self.snapshot = kind, snapshot
 
-    def observe(self, requested=None):
-        reading = self.device.telemetry()
-        if reading.get('uuid', '').lower() != self.uuid.lower() or reading.get('synthetic') is not False:
-            raise ValueError('Telemetry UUID/synthetic status differs from real selected GPU')
-        core = number(reading.get('clock_mhz'), 'GPU clock readback')
-        memory = reading.get('memory_clock_mhz')
-        if memory is None:
-            raise RuntimeError('Memory clock unavailable; apply this patch on Windows and restart the bridge')
-        number(memory, 'memory clock readback')
-        if requested is not None:
-            if abs(core-requested) > 15:
-                raise RuntimeError(f'Clock mismatch: requested {requested}, observed {core} MHz')
-            if self.memory_mhz is None:
-                self.memory_mhz = memory
-            elif self.memory_mhz != memory:
-                raise RuntimeError(f'Memory clock changed: {self.memory_mhz} -> {memory} MHz')
-        return {key: reading.get(key) for key in
-                ('uuid', 'timestamp_ns', 'clock_mhz', 'memory_clock_mhz', 'temperature_c')}
+
+class ClockGuard:
+    def __init__(self, device, uuid, memory_mhz=None, *, now_ns=time.monotonic_ns):
+        self.device, self.uuid, self.memory_mhz = device, uuid, memory_mhz
+        self.now_ns, self.last_snapshot = now_ns, None
+
+    def observe(self, requested=None, *, phase='idle', last_sync_ns=None):
+        # Caller and backend monotonic clocks are different in WSL/Windows.
+        snapshot = dict(phase=phase, requested_mhz=requested, passed=False,
+                        client_query_start_ns=self.now_ns(), client_last_sync_ns=last_sync_ns,
+                        client_clock_domain='collector_monotonic',
+                        backend_clock_domain='backend_monotonic_not_comparable_to_client')
+        self.last_snapshot = snapshot
+        if last_sync_ns is not None:
+            snapshot['sync_to_query_start_s'] = (snapshot['client_query_start_ns']-last_sync_ns)/1e9
+        kind = 'telemetry_error'
+        try:
+            try:
+                reading = self.device.telemetry()
+            finally:
+                snapshot['client_query_end_ns'] = self.now_ns()
+                snapshot['query_roundtrip_s'] = (snapshot['client_query_end_ns']-
+                                                snapshot['client_query_start_ns'])/1e9
+            # Only diagnostic fields are copied, never credentials or arbitrary replies.
+            for key in ('uuid', 'synthetic', 'timestamp_ns', 'clock_mhz', 'sm_clock_mhz',
+                        'memory_clock_mhz', 'temperature_c', 'power_mw', 'power_limit_mw',
+                        'performance_state', 'utilization_pct', 'clock_event_reasons',
+                        'clock_event_reasons_api', 'field_query_times_ns'):
+                if key in reading:
+                    snapshot[key] = reading[key]
+            snapshot['errors'] = {str(k): redact(str(v)) for k, v in reading.get('errors', {}).items()}
+            kind = 'identity_error'
+            if reading.get('uuid', '').lower() != self.uuid.lower() or reading.get('synthetic') is not False:
+                raise ValueError('Telemetry UUID/synthetic status differs from real selected GPU')
+            kind = 'missing_readback'
+            core = number(reading.get('clock_mhz'), 'GPU clock readback')
+            memory = reading.get('memory_clock_mhz')
+            if memory is None:
+                raise RuntimeError('Memory clock unavailable; update Windows code and restart the bridge')
+            number(memory, 'memory clock readback')
+            if requested is not None:
+                kind = 'memory_changed'
+                if self.memory_mhz is None:
+                    self.memory_mhz = memory
+                elif self.memory_mhz != memory:
+                    raise RuntimeError(f'Memory clock changed: {self.memory_mhz} -> {memory} MHz')
+                kind = 'core_mismatch'
+                if abs(core-requested) > 15:
+                    raise RuntimeError(f'Clock mismatch: requested {requested}, observed {core} MHz')
+            snapshot['passed'] = True
+        except Exception as exc:
+            snapshot.update(error=safe_error(exc), error_kind=kind)
+            raise ClockReadbackError(str(exc), kind, snapshot) from exc
+        return snapshot
+
+
+class ClockChecks:
+    """Preserve every read, including failures; retries never repair a postcheck.
+
+    A positive budget is an explicit port choice. Extra same-shape operations
+    are outside both timing passes. Individual CUDA/driver calls cannot be
+    preempted, but late results cannot make the check pass.
+    """
+    def __init__(self, guard, row, timeout_s=0, *, sleep=time.sleep, now_ns=time.monotonic_ns):
+        self.guard, self.row, self.timeout_s = guard, row, timeout_s
+        self.sleep, self.now_ns = sleep, now_ns
+
+    def __call__(self, phase, last_sync_ns, probe):
+        if phase not in CHECK_PHASES:
+            raise ValueError('Unknown clock checkpoint')
+        row, started = self.row, self.now_ns()
+        row['active_phase'] = phase
+        bounded = self.timeout_s > 0 and phase in PRECHECK_PHASES
+        deadline = started + int(self.timeout_s*1e9) if bounded else None
+        required = STABLE_READS if bounded else 1
+        check = dict(status='checking', started_client_ns=started, bounded=bounded,
+                     required_consecutive_reads=required, attempts=0, extra_operations=0)
+        row.setdefault('clock_checks', {})[phase] = check
+        observations = row.setdefault('clock_observations', [])
+        streak = 0
+        try:
+            while True:
+                if check['attempts']:
+                    remaining = (deadline-self.now_ns())/1e9
+                    if remaining <= 0:
+                        raise TimeoutError(f'Clock stability timeout at {phase}: {self.timeout_s:g} s')
+                    self.sleep(min(POLL_SECONDS, remaining))
+                    if self.now_ns() >= deadline:
+                        raise TimeoutError(f'Clock stability timeout at {phase}: {self.timeout_s:g} s')
+                    check['extra_operations'] += 1
+                    last_sync_ns = probe()
+                    if self.now_ns() >= deadline:
+                        raise TimeoutError(f'Clock stability timeout after extra operation at {phase}')
+                error = None
+                try:
+                    snapshot = self.guard.observe(row['requested_mhz'], phase=phase,
+                                                  last_sync_ns=last_sync_ns)
+                except ClockReadbackError as exc:
+                    snapshot, error = exc.snapshot, exc
+                check['attempts'] += 1
+                snapshot['attempt'] = check['attempts']
+                snapshot['within_deadline'] = deadline is None or self.now_ns() < deadline
+                streak = streak+1 if snapshot['passed'] else 0
+                snapshot['consecutive_matching_reads'] = streak
+                observations.append(snapshot)
+                row['snapshots'][phase] = snapshot  # Also retained on the throwing path.
+                if error is not None and (not bounded or error.kind != 'core_mismatch'):
+                    raise error
+                if not snapshot['within_deadline']:
+                    raise TimeoutError(f'Clock stability timeout during query at {phase}')
+                if streak >= required:
+                    check['status'] = 'passed'
+                    return snapshot
+        except BaseException as exc:
+            check.update(status='failed', error=safe_error(exc))
+            raise
+        finally:
+            check['ended_client_ns'] = self.now_ns()
+            check['elapsed_s'] = (check['ended_client_ns']-started)/1e9
 
 
 class TorchRuntime:
@@ -213,6 +331,13 @@ class TorchRuntime:
 
     def measure(self, row, warmup, repeat, observe):
         torch, spec = self.torch, row['case']
+        def phase(name):
+            row.update(active_phase=name, sample_index=None)
+        def probe():
+            operation()
+            torch.cuda.synchronize()
+            return time.monotonic_ns()
+        phase('allocating')
         with torch.inference_mode():
             generator = torch.Generator(device='cuda').manual_seed(0)
             if spec['operator'] == 'gemm':
@@ -227,28 +352,41 @@ class TorchRuntime:
                 output = torch.empty_like(a)
                 def operation(): torch.add(a, b, out=output)
             # Primary author-style host timing. No CUDA Event calls inside it.
+            phase('warmup_wall')
             for _ in range(warmup): operation()
             torch.cuda.synchronize()
-            row['snapshots']['before_wall'] = observe()
-            for _ in range(repeat):
+            last_sync = time.monotonic_ns()
+            observe('before_wall', last_sync, probe)
+            phase('sampling_wall')
+            for index in range(repeat):
+                row['sample_index'] = index
                 start = time.perf_counter()
                 operation()
                 torch.cuda.synchronize()
                 row['wall_samples_s'].append(time.perf_counter()-start)
-            row['snapshots']['after_wall'] = observe()
+                last_sync = time.monotonic_ns()
+            phase('after_wall')
+            observe('after_wall', last_sync, probe)
             # Independent CUDA Event pass for effective capacity estimates.
             events = [(torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
                       for _ in range(repeat)]
+            phase('warmup_cuda')
             for _ in range(warmup): operation()
             torch.cuda.synchronize()
-            row['snapshots']['before_cuda'] = observe()
-            for start, end in events:
+            last_sync = time.monotonic_ns()
+            observe('before_cuda', last_sync, probe)
+            phase('sampling_cuda')
+            for index, (start, end) in enumerate(events):
+                row['sample_index'] = index
                 start.record()
                 operation()
                 end.record()
                 end.synchronize()
                 row['cuda_event_samples_s'].append(start.elapsed_time(end)/1000.0)
-            row['snapshots']['after_cuda'] = observe()
+                last_sync = time.monotonic_ns()
+            phase('after_cuda')
+            observe('after_cuda', last_sync, probe)
+            phase('complete')
 
 
 def doctor(args, *, device_factory=backend, runtime_factory=TorchRuntime):
@@ -268,6 +406,8 @@ def doctor(args, *, device_factory=backend, runtime_factory=TorchRuntime):
         report['status'] = 'ready'
     except BaseException as exc:
         report['error'] = safe_error(exc)
+        if isinstance(exc, ClockReadbackError):
+            report['idle_readback'] = exc.snapshot
         raise
     finally:
         try:
@@ -283,7 +423,7 @@ def doctor(args, *, device_factory=backend, runtime_factory=TorchRuntime):
 
 
 def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep=time.sleep,
-            progress=None):
+            progress=None, now_ns=time.monotonic_ns):
     if not args.apply:
         raise ValueError('Real clock writes require explicit --apply')
     config = settings(args)
@@ -291,7 +431,9 @@ def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep
     data = dict(schema=SCHEMA, kind='eq1_isolated_operator_measurements', status='collecting',
                 created_utc=datetime.now(timezone.utc).isoformat(), config=config,
                 protocol=protocol(args), cases=cases(), records=[], synthetic=False,
-                real_cuda_executed=False, restoration=dict(attempted=False, reset_returned=False,
+                real_cuda_executed=False, rate_transitions=[],
+                active_context=dict(phase='initializing'),
+                restoration=dict(attempted=False, reset_returned=False,
                                                           physical_restore_verified=False))
     device = None
     device_lock = None
@@ -299,6 +441,7 @@ def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep
     failure = None
     old_handler = None
     handler_installed = False
+    row = None
     try:
         def terminate(signum, frame):
             raise KeyboardInterrupt('SIGTERM during Eq1 collection')
@@ -323,17 +466,30 @@ def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep
         device = device_factory(config)
         data['capabilities'] = capabilities(device, args.gpu_uuid, args.rates_mhz)
         data['synthetic'] = not runtime.real_cuda
-        guard = ClockGuard(device, args.gpu_uuid)
+        guard = ClockGuard(device, args.gpu_uuid, now_ns=now_ns)
         for rate in args.rates_mhz:
+            row = None
+            data['active_context'] = dict(phase='setting_frequency', requested_mhz=rate)
+            transition = dict(requested_mhz=rate, set_started_client_ns=now_ns(), set_returned=False)
+            data['rate_transitions'].append(transition)
             dirty = True  # A failing write may still have partially changed state.
             device.set(rate)
+            transition.update(set_returned=True, set_ended_client_ns=now_ns())
+            data['active_context']['phase'] = 'settle_wait'
+            transition['settle_started_client_ns'] = now_ns()
             sleep(0.5)
+            transition['settle_ended_client_ns'] = now_ns()
             for spec in data['cases']:
                 row = dict(record_id=f'{rate}/{spec["case_id"]}', case=dict(spec),
                            requested_mhz=rate, status='in_progress', wall_samples_s=[],
-                           cuda_event_samples_s=[], snapshots={})
+                           cuda_event_samples_s=[], snapshots={}, clock_observations=[],
+                           clock_checks={}, active_phase='allocating')
                 data['records'].append(row)
-                runtime.measure(row, args.warmup, args.repeat, lambda: guard.observe(rate))
+                data['active_context'] = dict(phase='measuring', requested_mhz=rate,
+                                              record_id=row['record_id'])
+                runtime.measure(row, args.warmup, args.repeat,
+                                ClockChecks(guard, row, args.clock_stability_timeout_s,
+                                            sleep=sleep, now_ns=now_ns))
                 for values in (row['wall_samples_s'], row['cuda_event_samples_s']):
                     if len(values) != args.repeat: raise ValueError('Incomplete timing repetitions')
                     for value in values: number(value, 'measured duration')
@@ -346,6 +502,14 @@ def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep
     except BaseException as exc:
         failure = exc
         data['error'] = safe_error(exc)
+        context = dict(data['active_context'])
+        if row is not None:
+            row['status'] = 'failed'
+            context.update(phase=row['active_phase'], sample_index=row.get('sample_index'),
+                           wall_samples_completed=len(row['wall_samples_s']),
+                           cuda_event_samples_completed=len(row['cuda_event_samples_s']),
+                           last_readback=row['clock_observations'][-1] if row['clock_observations'] else None)
+        data['failure_context'] = context
     finally:
         if device is not None and dirty:
             data['restoration']['attempted'] = True
@@ -370,6 +534,8 @@ def collect(args, *, device_factory=backend, runtime_factory=TorchRuntime, sleep
         if handler_installed:
             signal.signal(signal.SIGTERM, old_handler)
         data['status'] = 'failed' if failure is not None else 'collected'
+        if failure is None:
+            data['active_context'] = dict(phase='complete')
         save(out/'measurements.json', data)
     if failure is not None:
         raise failure
@@ -388,6 +554,13 @@ def checked_records(data, *, allow_synthetic=False):
     p = data['protocol']
     if p.get('traffic_semantics') != TRAFFIC or p.get('timing') != TIMING or p.get('dtype') != 'bfloat16':
         raise ValueError('Measurement semantics differ from this Eq1 protocol')
+    if p.get('clock_check_policy') != CLOCK_CHECK_POLICY or p.get('core_tolerance_mhz') != 15:
+        raise ValueError('Clock check policy differs from this Eq1 protocol')
+    stability = p.get('clock_stability', {})
+    budget = number(stability.get('timeout_s'), 'clock stability timeout', zero=True)
+    required = STABLE_READS if budget else 1
+    if stability.get('required_consecutive_reads') != required:
+        raise ValueError('Clock stability read count differs from this Eq1 protocol')
     rates = p['rates_mhz']
     if len(rates) < 2 or len(set(rates)) != len(rates) or p['reference_mhz'] not in rates:
         raise ValueError('Incomplete frequency grid')
@@ -407,8 +580,21 @@ def checked_records(data, *, allow_synthetic=False):
             for value in row[field]: number(value, field)
         if set(row['snapshots']) != {'before_wall', 'after_wall', 'before_cuda', 'after_cuda'}:
             raise ValueError('Missing timing-pass readbacks')
+        if (set(row.get('clock_checks', {})) != CHECK_PHASES or
+                any(check.get('status') != 'passed' for check in row['clock_checks'].values())):
+            raise ValueError('Incomplete/failed clock checkpoints')
+        for phase, check in row['clock_checks'].items():
+            reads = [r for r in row.get('clock_observations', []) if r.get('phase') == phase]
+            count = required if phase in PRECHECK_PHASES else 1
+            if (len(reads) != check.get('attempts') or len(reads) < count or
+                    row['snapshots'][phase] != reads[-1] or
+                    reads[-1].get('consecutive_matching_reads') != count or
+                    any(r.get('passed') is not True or r.get('within_deadline') is not True
+                        for r in reads[-count:])):
+                raise ValueError('Clock stability evidence is incomplete')
         for reading in row['snapshots'].values():
             if (reading['uuid'].lower() != data['config']['uuid'].lower() or
+                    reading.get('passed') is not True or reading.get('within_deadline') is not True or
                     abs(number(reading['clock_mhz'], 'GPU readback')-rate) > 15 or
                     reading['memory_clock_mhz'] != data['memory_clock_mhz']):
                 raise ValueError('Stored clock readbacks do not match the measurement contract')
@@ -529,6 +715,9 @@ def parser():
     p.add_argument('--reference-mhz', type=int, default=2527)
     p.add_argument('--warmup', type=int, default=5)
     p.add_argument('--repeat', type=int, default=5)
+    p.add_argument('--clock-stability-timeout-s', type=float, default=0,
+                   help='Opt-in precheck budget; 0 keeps one strict read. Positive: '
+                        'require 3 consecutive reads with extra untimed same-shape operations.')
     p.add_argument('--ack-default-auto', action='store_true')
     p.add_argument('--apply', action='store_true')
     return p

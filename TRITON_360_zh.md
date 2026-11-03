@@ -1,6 +1,8 @@
 # 显式使用已有独立 Triton 3.6.0
 
-适用于用户报告“普通 Qwen 启动需要 `/tmp/triton-360-test` 覆盖”的机器。保留现有 Conda/vLLM/torch，不执行全局 pip 替换，也不清除需要的 PYTHONPATH。这里只支持指定已有包，未在开发主机上执行真实 Triton kernel 或 Qwen 推理。
+适用于用户报告“普通 Qwen 启动需要独立 Triton 3.6.0 覆盖”的机器。2026-11-03 用户确认：WSL 重启后旧 `/tmp/triton-360-test` 丢失，独立包已安装到持久目录 `/mnt/d/s00958243/triton-360`，当前 `performance doctor` 已 ready。保留现有 Conda/vLLM/torch，不执行全局 pip 替换，也不清除需要的 PYTHONPATH。开发主机未执行真实 Triton kernel 或 Qwen 推理。
+
+当前只进行独立 [Eq. (1) 性能模型阶段](PERFORMANCE_EQ1_zh.md)。下文 `rtx5090.conda`、AWQ 模型及完整流程属于此前单卡 INT4 入口说明，不是当前 BF16 GEMM/加法采集步骤。
 
 在目标 WSL Bash 中先更新 5090 分支，退出旧 vLLM 实验进程，再执行：
 
@@ -11,21 +13,20 @@ git switch 5090
 git merge --ff-only origin/5090
 conda activate vllm-qwen
 PY=/home/s00958243/miniforge3/envs/vllm-qwen/bin/python
-test -f /tmp/triton-360-test/triton/__init__.py
+TRITON_ROOT=/mnt/d/s00958243/triton-360
+test -f "$TRITON_ROOT/triton/__init__.py"
 ```
 
-建议在正式 baseline **之前**把已有包复制到持久目录，避免重启/临时目录清理后丢失。保留原包，不重新下载或安装，不修改当前 Conda：
+复用已确认的持久目录，不再复制已丢失的临时包，也不修改当前 Conda：
 
 ```bash
-TRITON_ROOT="$HOME/.local/opt/sparsedvfs-triton-3.6.0-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$(dirname "$TRITON_ROOT")"
-cp -a /tmp/triton-360-test "$TRITON_ROOT"
 export PYTHONPATH="$TRITON_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export TRITON_CACHE_DIR="$HOME/.cache/sparsedvfs/triton-3.6.0"
+export SPARSEDVFS_TRITON_PATH="$TRITON_ROOT"
+export TRITON_CACHE_DIR=/mnt/d/s00958243/triton360-cache
 mkdir -p "$TRITON_CACHE_DIR"
 ```
 
-如果本次只先诊断现有临时包，可以暂用 `TRITON_ROOT=/tmp/triton-360-test`，仍传 `--triton-path "$TRITON_ROOT"`。开始正式实验前再迁移，并从 baseline 重新采集；迁移前后的 profile 不混用。
+后续每次新终端重设上述变量，并记录实际导入路径；包路径变更前后的 profile 不混用。
 
 检查实际导入，预期版本 3.6.0，路径指向所选目录：
 

@@ -13,7 +13,8 @@ import unittest
 from unittest.mock import patch
 
 from rtx5090.backends import NVML
-from rtx5090.performance import (AUTHOR_COMMIT, ClockGuard, DEFAULT_GPU, TorchRuntime, cases,
+from rtx5090.performance import (AUTHOR_COMMIT, ClockChecks, ClockGuard, ClockReadbackError,
+                                 DEFAULT_GPU, TorchRuntime, cases,
                                  checked_records, collect, digest, doctor, fit_model,
                                  load, main, parser, protocol, save, settings,
                                  source_hashes, validate_model)
@@ -69,15 +70,16 @@ class FakeRuntime:
                     memory_free_bytes=8*1024**3, sources_sha256=source_hashes())
 
     def measure(self, row, warmup, repeat, observe):
-        row['snapshots']['before_wall'] = observe()
+        observe('before_wall', 0, lambda: 0)
         spec, rate = row['case'], row['requested_mhz']
         peak = 1e14*rate/2527
         roofline = max(spec['work_flop']/peak, spec['data_byte']/1e12)
         row['wall_samples_s'].extend([roofline+20e-6]*repeat)
-        row['snapshots']['after_wall'] = observe()
-        row['snapshots']['before_cuda'] = observe()
+        observe('after_wall', 0, lambda: 0)
+        observe('before_cuda', 0, lambda: 0)
         row['cuda_event_samples_s'].extend([roofline]*repeat)
-        row['snapshots']['after_cuda'] = observe()
+        observe('after_cuda', 0, lambda: 0)
+        row['active_phase'] = 'complete'
 
 
 def observations():
@@ -92,7 +94,7 @@ def observations():
             row = dict(record_id=f'{rate}/{spec["case_id"]}', case=spec,
                        requested_mhz=rate, status='complete', wall_samples_s=[],
                        cuda_event_samples_s=[], snapshots={})
-            runtime.measure(row, 5, 5, lambda: guard.observe(rate))
+            runtime.measure(row, 5, 5, ClockChecks(guard, row))
             records.append(row)
     return dict(schema=1, kind='eq1_isolated_operator_measurements', status='collected',
                 synthetic=True, real_cuda_executed=False, config=settings(a),
@@ -171,6 +173,8 @@ class ModelTests(unittest.TestCase):
                        lambda d: d['restoration'].update(reset_returned=False),
                        lambda d: d.update(status='failed'),
                        lambda d: d['records'][0]['wall_samples_s'].__setitem__(0, float('nan')),
+                       lambda d: d['records'][0].update(clock_observations=[]),
+                       lambda d: d['records'][0]['clock_checks']['after_wall'].update(status='failed'),
                        lambda d: d['cases'][0].update(data_byte=1),
                        lambda d: d['environment'].update(sources_sha256={})):
             data = observations()
@@ -234,6 +238,37 @@ class CollectionTests(unittest.TestCase):
                 if options.get('memory_change'):
                     self.assertEqual(len(result['records'][0]['wall_samples_s']), 5)
 
+    def test_reported_second_rate_failure_keeps_phase_and_raw_readback(self):
+        class SecondRateMismatch(FakeDevice):
+            def telemetry(self):
+                result = super().telemetry()
+                if self.rate == 2527:
+                    result.update(clock_mhz=2407, sm_clock_mhz=2407,
+                                  clock_event_reasons=4, performance_state=0,
+                                  power_mw=410000, power_limit_mw=600000)
+                return result
+        with tempfile.TemporaryDirectory() as folder:
+            device = SecondRateMismatch()
+            with self.assertRaisesRegex(RuntimeError, 'observed 2407'):
+                self.run_collect(folder, device)
+            result = load(Path(folder)/'measurements.json')
+            self.assertEqual(sum(r['status'] == 'complete' for r in result['records']), 12)
+            row = result['records'][-1]
+            self.assertEqual(row['record_id'], '2527/gemm_8192')
+            self.assertEqual(row['wall_samples_s'], [])
+            self.assertEqual(row['cuda_event_samples_s'], [])
+            reading = row['snapshots']['before_wall']
+            self.assertEqual(reading['clock_mhz'], 2407)
+            self.assertEqual(reading['clock_event_reasons'], 4)
+            self.assertFalse(reading['passed'])
+            self.assertEqual(reading['error_kind'], 'core_mismatch')
+            self.assertEqual(result['failure_context']['phase'], 'before_wall')
+            self.assertEqual(result['failure_context']['last_readback'], reading)
+            self.assertTrue(result['restoration']['reset_returned'])
+            self.assertFalse(result['restoration']['physical_restore_verified'])
+            with self.assertRaisesRegex(ValueError, 'complete collection'):
+                fit_model(result, allow_synthetic=True)
+
     def test_failed_write_still_attempts_reset(self):
         with tempfile.TemporaryDirectory() as folder:
             device = FakeDevice(set_failure=True)
@@ -288,6 +323,134 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(load(Path(folder)/'doctor.json')['status'], 'failed')
 
 
+class FakeClock:
+    def __init__(self): self.ns = 1_000_000_000
+    def now(self): return self.ns
+    def sleep(self, seconds): self.ns += round(seconds*1e9)
+
+
+class ClockCheckTests(unittest.TestCase):
+    def checker(self, rates, timeout=0, *, phase='before_wall', query_seconds=0):
+        clock, device = FakeClock(), FakeDevice()
+        pending = iter(rates)
+        original = device.telemetry
+        def telemetry():
+            clock.sleep(query_seconds)
+            return dict(original(), clock_mhz=next(pending))
+        device.telemetry = telemetry
+        guard = ClockGuard(device, DEFAULT_GPU, now_ns=clock.now)
+        row = dict(requested_mhz=2527, snapshots={})
+        check = ClockChecks(guard, row, timeout, sleep=clock.sleep, now_ns=clock.now)
+        probes = []
+        def probe():
+            probes.append(clock.now())
+            clock.sleep(.001)
+            return clock.now()
+        return lambda: check(phase, clock.now()-1_000_000, probe), row, device, probes
+
+    def test_default_is_one_strict_read_without_extra_work(self):
+        run, row, device, probes = self.checker([2407, 2527])
+        with self.assertRaises(ClockReadbackError): run()
+        self.assertEqual(device.readings, 1)
+        self.assertEqual(probes, [])
+        reading = row['clock_observations'][0]
+        self.assertEqual(reading['sync_to_query_start_s'], .001)
+        self.assertEqual(reading['query_roundtrip_s'], 0)
+        self.assertEqual(row['clock_checks']['before_wall']['status'], 'failed')
+
+    def test_opt_in_requires_three_consecutive_reads_and_keeps_initial_failures(self):
+        run, row, device, probes = self.checker([2407, 2527, 2512, 2407, 2542, 2527, 2512], 5)
+        result = run()
+        self.assertEqual([r['consecutive_matching_reads'] for r in row['clock_observations']],
+                         [0, 1, 2, 0, 1, 2, 3])
+        self.assertEqual(result['clock_mhz'], 2512)  # Exactly -15 MHz is accepted.
+        self.assertEqual(len(probes), 6)
+        self.assertEqual(device.calls, [])  # Checks never write/rewrite clocks.
+        self.assertEqual(row['clock_checks']['before_wall']['status'], 'passed')
+        p = protocol(arguments('collect', '.', '--clock-stability-timeout-s', '5'))
+        self.assertTrue(p['clock_stability']['author_flow_deviation'])
+        self.assertEqual(p['warmup'], 5)
+        self.assertEqual(p['repeat'], 5)
+        self.assertEqual(p['settle_s'], .5)
+        self.assertEqual(p['rates_mhz'], [2250, 2527])
+        self.assertEqual(p['core_tolerance_mhz'], 15)
+
+    def test_timeout_stops_probes_and_keeps_all_failed_reads(self):
+        run, row, device, probes = self.checker([2407]*10, .25)
+        with self.assertRaisesRegex(TimeoutError, 'stability timeout'): run()
+        self.assertEqual(device.readings, 3)
+        self.assertEqual(len(probes), 2)
+        self.assertEqual(row['snapshots']['before_wall']['clock_mhz'], 2407)
+        self.assertAlmostEqual(row['clock_checks']['before_wall']['elapsed_s'], .25)
+
+    def test_late_matching_query_cannot_pass(self):
+        run, row, device, probes = self.checker([2527], .25, query_seconds=.3)
+        with self.assertRaisesRegex(TimeoutError, 'during query'): run()
+        reading = row['snapshots']['before_wall']
+        self.assertTrue(reading['passed'])  # Clock comparison passed, overall checkpoint failed.
+        self.assertFalse(reading['within_deadline'])
+        self.assertEqual(row['clock_checks']['before_wall']['status'], 'failed')
+        self.assertEqual(probes, [])
+
+    def test_no_query_is_started_after_a_probe_exceeds_the_budget(self):
+        clock, device = FakeClock(), FakeDevice()
+        row = dict(requested_mhz=2527, snapshots={})
+        check = ClockChecks(ClockGuard(device, DEFAULT_GPU, now_ns=clock.now), row, .25,
+                            sleep=clock.sleep, now_ns=clock.now)
+        def slow_probe():
+            clock.sleep(.3)
+            return clock.now()
+        with self.assertRaisesRegex(TimeoutError, 'after extra operation'):
+            check('before_wall', clock.now(), slow_probe)
+        self.assertEqual(device.readings, 1)
+
+    def test_optional_timeout_also_restores_and_blocks_fit(self):
+        clock, device = FakeClock(), FakeDevice(mismatch=True)
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(TimeoutError):
+                collect(arguments('collect', folder, '--apply', '--clock-stability-timeout-s', '.25'),
+                        device_factory=lambda cfg: device, runtime_factory=FakeRuntime,
+                        sleep=clock.sleep, now_ns=clock.now)
+            result = load(Path(folder)/'measurements.json')
+            self.assertTrue(result['restoration']['reset_returned'])
+            self.assertEqual(result['failure_context']['phase'], 'before_wall')
+            self.assertEqual(result['records'][0]['clock_checks']['before_wall']['attempts'], 3)
+            with self.assertRaises(ValueError): fit_model(result, allow_synthetic=True)
+
+    def test_postcheck_never_retries_even_when_stability_option_is_set(self):
+        for phase in ('after_wall', 'after_cuda'):
+            with self.subTest(phase=phase):
+                run, row, device, probes = self.checker([2407, 2527, 2527, 2527], 5, phase=phase)
+                with self.assertRaises(ClockReadbackError): run()
+                self.assertEqual(device.readings, 1)
+                self.assertEqual(probes, [])
+
+    def test_memory_identity_and_query_errors_are_fatal_not_retried(self):
+        for kind in ('memory', 'identity', 'query'):
+            with self.subTest(kind=kind), patch.dict(os.environ, {'SPARSEDVFS_BRIDGE_TOKEN': 'sentinel-secret'}):
+                clock, device = FakeClock(), FakeDevice()
+                guard = ClockGuard(device, DEFAULT_GPU, memory_mhz=14001, now_ns=clock.now)
+                if kind == 'identity': device.uuid = 'GPU-other'
+                if kind == 'query':
+                    def fail(): raise RuntimeError('sentinel-secret')
+                    device.telemetry = fail
+                row = dict(requested_mhz=2527, snapshots={})
+                with self.assertRaises(ClockReadbackError):
+                    ClockChecks(guard, row, 5, sleep=clock.sleep, now_ns=clock.now)(
+                        'before_cuda', clock.now(), lambda: self.fail('Must not probe'))
+                self.assertEqual(len(row['clock_observations']), 1)
+                self.assertNotIn('sentinel-secret', json.dumps(row))
+
+    def test_invalid_timeout_rejected_before_constructing_backend(self):
+        for value in ('-1', 'nan', 'inf'):
+            with self.subTest(value=value):
+                factory = unittest.mock.Mock()
+                with self.assertRaises(ValueError):
+                    collect(arguments('collect', '.', '--apply', '--clock-stability-timeout-s', value),
+                            device_factory=factory)
+                factory.assert_not_called()
+
+
 class BackendAndCliTests(unittest.TestCase):
     def test_offline_cli_writes_report_and_does_not_change_model(self):
         # Synthetic permission is injected only by this test, never exposed by CLI.
@@ -328,8 +491,10 @@ class BackendAndCliTests(unittest.TestCase):
                                    cuda=NS(synchronize=lambda: log.append('device_sync'), Event=Event))
                 row = dict(case=next(s for s in cases() if s['operator'] == kind),
                            snapshots={}, wall_samples_s=[], cuda_event_samples_s=[])
-                def observe():
+                def observe(phase, last_sync_ns, probe):
                     log.append('readback')
+                    row['snapshots'][phase] = {'test_only': True}
+                    self.assertIsInstance(last_sync_ns, int)
                     return {'test_only': True}
                 with patch('rtx5090.performance.time.perf_counter', side_effect=range(10)):
                     runtime.measure(row, 5, 5, observe)
@@ -353,6 +518,34 @@ class BackendAndCliTests(unittest.TestCase):
             device.close()
         self.assertEqual(result['memory_clock_mhz'], 13801)
         self.assertEqual(result['clock_mhz'], 2250)
+
+    def test_nvml_optional_diagnostics_and_legacy_reason_fallback(self):
+        class Library:
+            def nvmlInit_v2(self): return 0
+            def nvmlShutdown(self): return 0
+            def nvmlDeviceGetHandleByUUID(self, uuid, ptr): return 0
+            def nvmlDeviceGetClockInfo(self, handle, domain, ptr):
+                C.cast(ptr, C.POINTER(C.c_uint))[0] = [2407, 2407, 14001][domain.value]
+                return 0
+            def nvmlDeviceGetCurrentClocksThrottleReasons(self, handle, ptr):
+                C.cast(ptr, C.POINTER(C.c_ulonglong))[0] = 4
+                return 0
+            def nvmlDeviceGetPowerManagementLimit(self, handle, ptr):
+                C.cast(ptr, C.POINTER(C.c_uint))[0] = 600000
+                return 0
+        with patch('rtx5090.backends.C.CDLL', return_value=Library()):
+            device = NVML(DEFAULT_GPU)
+            result = device.telemetry()
+            device.close()
+        self.assertEqual(result['sm_clock_mhz'], 2407)
+        self.assertEqual(result['power_limit_mw'], 600000)
+        self.assertEqual(result['clock_event_reasons'], 4)
+        self.assertEqual(result['clock_event_reasons_api'], 'nvmlDeviceGetCurrentClocksThrottleReasons')
+        self.assertIn('nvmlDeviceGetCurrentClocksEventReasons', result['errors'])
+        self.assertIsNone(result['performance_state'])
+        self.assertIn('performance_state', result['errors'])
+        for value in result['field_query_times_ns'].values():
+            self.assertGreaterEqual(value['end'], value['start'])
 
     def test_cli_fit_rejects_synthetic_without_creating_model(self):
         with tempfile.TemporaryDirectory() as folder:
