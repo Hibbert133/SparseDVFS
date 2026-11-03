@@ -21,6 +21,20 @@ ROOT=Path(__file__).resolve().parents[1]
 GPU=dict(backend='mock',rates_mhz=[900,1500,2100],uuid='GPU-MOCK')
 
 class ProtocolTests(unittest.TestCase):
+    def test_idle_memory_state_does_not_remove_high_clock_candidates(self):
+        device=NVML.__new__(NVML); device.uuid='GPU-TEST'
+        device._call=lambda *args:None
+        device.read=lambda:2527
+        def listing(name,*args):
+            if name=='nvmlDeviceGetSupportedMemoryClocks': return [405,13801]
+            return [180,885] if args[0].value==405 else [180,885,2250,2527,3090]
+        device._list=listing
+        value=device.probe()
+        self.assertEqual(value['rates_mhz'],[180,885,2250,2527,3090])
+        self.assertFalse(value['set_reset_verified'])
+        self.assertEqual(value['memory_clock_ranges'][0]['max_gpu_mhz'],885)
+        self.assertEqual(value['clock_grid_basis'],'union_requires_loaded_apply_validation')
+
     def test_quantized_engine_and_model_lock(self):
         args=engine_args(); self.assertEqual(args['worker_cls'],'rtx5090.worker.SparseDVFSWorker')
         self.assertNotIn('quantization',args)

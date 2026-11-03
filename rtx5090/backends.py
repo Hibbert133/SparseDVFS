@@ -55,14 +55,20 @@ class NVML:
         return list(values)[:count.value]
     def probe(self):
         memory = self._list('nvmlDeviceGetSupportedMemoryClocks')
-        # Memory remains system managed. Only use core rates valid for every reported memory state.
-        rates = set.intersection(*(set(self._list('nvmlDeviceGetSupportedGraphicsClocks', C.c_uint(m))) for m in memory))
-        if not rates: raise RuntimeError('No common supported GPU clocks')
+        # Idle memory states can cap their graphics list at 885 MHz on a 5090.
+        # These are candidates, NOT proof of lock support at all memory states.
+        # Real deployment still requires explicit apply + loaded readback calibration.
+        by_memory = {m: self._list('nvmlDeviceGetSupportedGraphicsClocks', C.c_uint(m)) for m in memory}
+        rates = set().union(*map(set, by_memory.values()))
+        if not rates: raise RuntimeError('No reported GPU clock candidates')
         driver=C.create_string_buffer(128); name=C.create_string_buffer(128)
         self._call('nvmlSystemGetDriverVersion',driver,C.c_uint(len(driver)))
         self._call('nvmlDeviceGetName',self.handle,name,C.c_uint(len(name)))
         return dict(uuid=self.uuid, driver=driver.value.decode(), name=name.value.decode(), rates_mhz=sorted(rates), clock_mhz=self.read(), synthetic=False,
-                    set_reset_verified=False, memory_policy='system-managed')
+                    set_reset_verified=False, memory_policy='system-managed',
+                    clock_grid_basis='union_requires_loaded_apply_validation',
+                    memory_clock_ranges=[dict(memory_mhz=m, min_gpu_mhz=min(v), max_gpu_mhz=max(v), count=len(v))
+                                         for m,v in sorted(by_memory.items())])
     def set(self, mhz):
         self._call('nvmlDeviceSetGpuLockedClocks', self.handle, C.c_uint(mhz), C.c_uint(mhz))
     def reset(self): self._call('nvmlDeviceResetGpuLockedClocks', self.handle)
