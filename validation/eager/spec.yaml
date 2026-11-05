@@ -1,0 +1,34 @@
+paper: https://arxiv.org/html/2603.21908v1
+date: 2026-11-05
+branch: 5090_eager
+objective: all paper mechanisms, with separate mathematical and hardware acceptance
+paper_specified:
+  eq1: max(W*(1-Sc)/P(cpu,gpu), D*(1-Sm)/B(mem)) + overhead
+  eq2: alpha(Sc)*V*V*f + (k1*T+k2)*V
+  algorithm1: merge when frequency similar OR current duration < N*Tswitch; componentwise max; append terminal block
+  eq3: block duration strictly greater than N*Tswitch
+  fuse: coupled CPU/GPU/EMC domains, CPU launch boost, memory coordination
+  lookahead: submit next scaling instruction before current block completes
+implementation_choices:
+  workload: {input: 512, output: 64, concurrency: 1, dtype: bfloat16, tp: 2, load_format: auto}
+  frequencies_mhz: [2250, 2527]
+  tolerance_mhz: 15
+  N: 5
+  similarity: relative_L_infinity_0.05
+  deadline: eager_AUTO_latency_times_1.05
+  windows: {train: 3, validation: 3, requests: 20}
+  validation: {wape: 0.10, p90_relative_error: 0.20}
+  coordination: local Unix sockets independent of model collectives
+  first_runtime: two-rank GPU completion, paired clock change, readback, release next block
+  telemetry: existing dual-board counter or qualified power integration
+unresolved:
+  - CPU and EMC control on Windows/WSL; no implicit global policy writes
+  - effective sparsity of actual Qwen kernels
+  - same-path Eq1 capacity and overhead calibration
+  - Eq2 voltage and parameter identifiability
+  - worker multi-stream completion and TP boundary correspondence
+  - physical transition resolution and safe lookahead horizon
+acceptance:
+  software: contracts, equations, partition, rendezvous, timeout, restoration, dataset isolation
+  hardware: target machine only; no synthetic evidence can authorize deployment
+  completion: unavailable domains and missing evidence remain explicitly incomplete

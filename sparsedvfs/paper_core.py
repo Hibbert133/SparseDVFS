@@ -96,7 +96,8 @@ def relative_frequency_similarity(tolerance):
     return compare
 
 
-def greedy_partition(graph, predict_frequency, calc_time_s, frequencies_similar, switch_s, factor):
+def greedy_partition(graph, predict_frequency, calc_time_s, frequencies_similar, switch_s, factor,
+                     *, frequency_factory=Frequency.of):
     """Literal Algorithm 1 OR/max/final-append semantics, with explicit callbacks.
 
     calc_time_s must predict the whole current block at the given vector. A
@@ -107,7 +108,7 @@ def greedy_partition(graph, predict_frequency, calc_time_s, frequencies_similar,
     factor = finite(factor, 'N', positive=True)
     threshold = finite(factor * switch_s, 'N*T_switch', positive=True)
     members = [graph.nodes[0]]
-    frequency = Frequency.of(predict_frequency(members[0]))
+    frequency = frequency_factory(predict_frequency(members[0]))
     blocks, decisions = [], []
 
     def duration(nodes, target):
@@ -119,7 +120,7 @@ def greedy_partition(graph, predict_frequency, calc_time_s, frequencies_similar,
                            amortized_strict_gt=elapsed > threshold))
 
     for name in graph.nodes[1:]:
-        upcoming = Frequency.of(predict_frequency(name))
+        upcoming = frequency_factory(predict_frequency(name))
         estimate = duration(members, frequency)
         short, near = estimate < threshold, bool(frequencies_similar(frequency, upcoming))
         decisions.append(dict(current=list(members), next=name, current_triplet=list(frequency.values),

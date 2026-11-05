@@ -56,7 +56,7 @@ def model_id(identity):
 
 
 async def stop_profile(identity):
-    if all(identity['profiler_routes'].values()):
+    if all(identity.get('profiler_routes', {}).get(p) is True for p in ('/start_profile', '/stop_profile')):
         await asyncio.to_thread(client_api.http, identity['base_url'], '/stop_profile', {}, 600)
         if identity.get('launch_dir'):
             log = (Path(identity['launch_dir'])/'startup.log').read_text(encoding='utf-8', errors='replace')
@@ -369,11 +369,11 @@ async def observe(args):
     return report
 
 
-async def pilot(args):
-    identity = checked_identity(args.identity)
+async def pilot(args, *, identity=None):
+    identity = checked_identity(args.identity) if identity is None else identity
     config = core.read(args.telemetry)
     out = fresh(args.out)
-    result = dict(schema=core.SCHEMA, status='failed', identity_fingerprint=identity['fingerprint'],
+    result = dict(schema=identity.get('schema', core.SCHEMA), status='failed', identity_fingerprint=identity['fingerprint'],
                   telemetry_config_sha256=digest(config), requests_per_window=args.requests,
                   sample_interval_s=.1)
     devices = []
@@ -405,15 +405,15 @@ async def pilot(args):
     return result
 
 
-async def clock_check(args):
+async def clock_check(args, *, identity=None):
     if not args.apply or not args.ack_default_auto:
         raise ValueError('Clock acceptance requires --apply and --ack-default-auto')
-    identity = checked_identity(args.identity)
+    identity = checked_identity(args.identity) if identity is None else identity
     config = core.read(args.telemetry)
     if any(r['backend'] != 'bridge' for r in config):
         raise ValueError('This Windows/WSL clock gate requires bridge disconnect recovery on both cards')
     out = fresh(args.out)
-    result = dict(schema=core.SCHEMA, status='failed', identity_fingerprint=identity['fingerprint'],
+    result = dict(schema=identity.get('schema', core.SCHEMA), status='failed', identity_fingerprint=identity['fingerprint'],
                   telemetry_config_sha256=digest(config), cases=[], synthetic=False)
     devices = []
     controller = telemetry.DualClocks(devices, apply=True)
