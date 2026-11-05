@@ -484,12 +484,14 @@ class AsyncClient(unittest.IsolatedAsyncioTestCase):
         async def request(inp, session):
             self.assertTrue(inp.ignore_eos)
             self.assertFalse(inp.extra_body['add_special_tokens'])
+            self.assertEqual(inp.extra_body['cache_salt'], 'test-isolation')
             session.usage = dict(prompt_tokens=128, completion_tokens=64)
             return NS(success=True, output_tokens=64, prompt_len=128, latency=6.4, ttft=.1, generated_text='out')
         bench.endpoint = NS(RequestFuncInput=lambda **kw: NS(**kw),
                             StreamedResponseHandler=lambda: None,
                             ASYNC_REQUEST_FUNCS={'openai': request})
-        result = await bench.run(dict(tokens=[1]*128, length=128, request_id='r', prompt_hash='p'))
+        result = await bench.run(dict(tokens=[1]*128, length=128, request_id='r', prompt_hash='p',
+                                     cache_salt='test-isolation'))
         self.assertAlmostEqual(result['tpot_s'], .1)
         self.assertNotIn('generated_text', result)
 

@@ -170,6 +170,39 @@ async def clear_cache(identity):
     if answer is False: raise RuntimeError('Prefix cache reset failed')
 
 
+async def isolate_observation_cache(identity, request):
+    """Observation-only isolation; worker scheduler evidence still proves a miss.
+
+    Do not relax reset requirements for paired energy/latency windows.
+    """
+    if service.prefix_policy(identity) is False:
+        return dict(method='prefix_cache_disabled', miss_verified=False)
+    api = await asyncio.to_thread(client_api.http, identity['base_url'], '/openapi.json')
+    paths = api.get('paths', {})
+    if 'post' in paths.get('/reset_prefix_cache', {}):
+        answer = await asyncio.to_thread(client_api.http, identity['base_url'], '/reset_prefix_cache', {})
+        if answer is False: raise RuntimeError('Prefix cache reset failed')
+        return dict(method='reset_prefix_cache', miss_verified=False)
+    schema = paths.get('/v1/completions', {}).get('post', {}).get('requestBody', {}).get(
+        'content', {}).get('application/json', {}).get('schema', {})
+    seen = set()
+    while '$ref' in schema:
+        ref = schema['$ref']
+        if not ref.startswith('#/') or ref in seen:
+            raise ValueError('Cannot resolve live completion request schema')
+        seen.add(ref)
+        schema = api
+        for key in ref[2:].split('/'):
+            schema = schema.get(key.replace('~1', '/').replace('~0', '~'), {})
+    field = schema.get('properties', {}).get('cache_salt', {})
+    if not (field.get('type') == 'string' or any(
+            option.get('type') == 'string' for option in field.get('anyOf', []))):
+        raise RuntimeError('Observation requires reset_prefix_cache or advertised string cache_salt; no request armed')
+    request['cache_salt'] = uuid.uuid4().hex
+    return dict(method='unique_request_cache_salt', miss_verified=False,
+                advertised_field=field, openapi_sha256=digest(api))
+
+
 def coverage(directory, identity):
     rows = [read(Path(directory)/f'rank-{rank}-execution.json') for rank in (0, 1)]
     expected = ['prefill']+[f'decode.{i}' for i in range(63)]
@@ -195,13 +228,17 @@ async def observe(args):
     try:
         async with client_api.BenchClient(identity['base_url'], service.model_id(identity)) as client:
             await service.warmup(client, 512, 100, 'eager-observe-'+out.name)
-            await clear_cache(identity)
             request = client.prepare(512, args.seed, 'eager-'+uuid.uuid4().hex)
+            result['cache_isolation'] = await isolate_observation_cache(identity, request)
+            result['client_provenance'] = dict(commit=git('rev-parse', 'HEAD'),
+                eager_sha256=client_api.sha(__file__), service_client_sha256=client_api.sha(client_api.__file__))
             write_new(out/'request.json', request)
             rank_commands(identity, dict(op='arm', mode='observe' if args.trace else 'units',
                 out=str(out), request_id=request['request_id'], prompt_hash=request['prompt_hash']))
             result['reply'] = await client.run(request)
             result['coverage'] = coverage(out, identity)
+            result['cache_isolation'].update(miss_verified=True,
+                evidence='both_rank_context_key_requires_admitted_zero_and_full_512_prefill')
             result['status'] = 'complete'
     except BaseException as exc:
         result.update(status='failed', error=safe_error(exc)); raise

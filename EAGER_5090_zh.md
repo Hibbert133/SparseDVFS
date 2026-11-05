@@ -104,6 +104,13 @@ python -B -m rtx5090.eager observe --identity "$EAGER_RUN/identity.json" \
 预期双rank真实身份一致、prefill与63个decode上下文、每步完整执行单元顺序。失败即保留两rank日志；不要自动再加载模型。
 通过后另选新目录执行一次带 `--trace` 的observe，取得真实kernel/shape/stride清单，作为回放适配依据；其耗时不进入性能拟合。
 
+2026-11-05 目标机确认 vLLM 0.32 的 `/reset_prefix_cache` 仅在 `VLLM_SERVER_DEV_MODE` 下注册。
+`observe` 在此接口缺失时检查当前服务 OpenAPI 的 completion 请求是否声明字符串 `cache_salt`；
+支持才为每次观察生成独立盐并保存到 `request.json`，不改变 prompt token、prefix-cache 配置或开启开发接口。
+盐仅作为隔离手段，不直接证明未命中：仍要求两个 rank 的调度记录从0开始、完整512-token prefill，
+以及63个decode上下文全部通过。失败不标为已观察完整请求。客户端提交及源码哈希另记，保留常驻worker原身份。
+该适配仅用于执行观察；正式配对窗口的清缓存要求没有放宽。93项相关CPU检查通过，不代表目标机观察已通过。
+
 ## 4. eager 本轮硬件验收与最早可得实测结果
 
 `TEL` 是审核过的实际双卡遥测JSON（模板没有凭据）：

@@ -257,10 +257,15 @@ class BenchClient:
         return dict(request_id=request_id, tokens=tokens, prompt_hash=digest(tokens), length=length, seed=seed)
 
     async def run(self, request):
+        extra = dict(temperature=0, add_special_tokens=False)
+        if 'cache_salt' in request:
+            if not isinstance(request['cache_salt'], str) or not request['cache_salt']:
+                raise ValueError('cache_salt must be a nonempty string')
+            extra['cache_salt'] = request['cache_salt']
         inp = self.endpoint.RequestFuncInput(prompt=request['tokens'], prompt_len=request['length'],
             output_len=64, model=self.model_id, api_url=self.base+'/v1/completions',
             ignore_eos=True, request_id=request['request_id'],
-            extra_body=dict(temperature=0, add_special_tokens=False))
+            extra_body=extra)
         session = UsageSession(self.session, self.endpoint.StreamedResponseHandler)
         output = await self.endpoint.ASYNC_REQUEST_FUNCS['openai'](inp, session=session)
         if not output.success: raise RuntimeError('Benchmark request failed: '+output.error)
