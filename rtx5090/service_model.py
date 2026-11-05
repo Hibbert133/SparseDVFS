@@ -218,6 +218,67 @@ async def restore_checked(controller, client, devices, baseline, seed, prefix, a
     return after
 
 
+def rank_trace_files(directory, prefix):
+    pattern = re.compile(re.escape(prefix)+r'_(?:rank|tp)([01])(?:[_.].*)?\.trace\.json(?:\.gz)?$')
+    found = {}
+    for file in Path(directory).rglob(prefix+'*'):
+        if not file.is_file(): continue
+        match = pattern.fullmatch(file.name)
+        if not match: continue
+        rank = int(match.group(1))
+        if rank in found: raise ValueError('Multiple trace files for one rank/window')
+        found[rank] = file
+    if set(found) != {0, 1}:
+        raise ValueError(f'Both rank traces required; matched ranks={sorted(found)} for prefix={prefix}')
+    return found
+
+
+def parse_window_trace(file, entry):
+    parsed = core.correlate_trace(core.read_trace(file), entry['max_iterations'])
+    has_context = any(re.search(r'context_[1-9]', n) for n in parsed['annotation_names'])
+    phase = entry['requested_phase']
+    if phase.startswith('decode') and has_context:
+        parsed['issues'].append('Decode window includes context work; scheduling differs')
+    if phase == 'prefill' and not has_context:
+        parsed['issues'].append('Prefill not observed')
+    if parsed['issues']: parsed['status'] = 'incomplete'
+    return parsed
+
+
+def analyze_observation(args):
+    original = core.read(args.observation)
+    out = fresh(args.out)
+    result = dict(schema=core.SCHEMA, status='failed',
+        source_observation_sha256=digest(original), source_status=original.get('status'),
+        identity_fingerprint=original.get('identity_fingerprint'), windows=[],
+        scope='offline_existing_windows_only_not_full_observation_protocol',
+        operator_models_ready=False)
+    try:
+        if original.get('schema') != core.SCHEMA or not original.get('windows'):
+            raise ValueError('No recorded service observation windows')
+        issues = []
+        for old in original['windows']:
+            entry = {k: v for k, v in old.items() if k != 'ranks'}
+            entry['ranks'] = {}
+            result['windows'].append(entry)
+            for rank, file in rank_trace_files(args.trace_dir, entry['prefix']).items():
+                parsed = parse_window_trace(file, entry)
+                core.write_new(out/f'{entry["prefix"]}-rank-{rank}.json', parsed)
+                entry['ranks'][str(rank)] = dict(trace=str(file.resolve()), sha256=client_api.sha(file),
+                    summary={k: v for k, v in parsed.items() if k != 'signatures'})
+                issues.extend(f'rank {rank}: {issue}' for issue in parsed['issues'])
+            if entry.get('cache_status') != 'verified_miss':
+                issues.append('Original window cache miss not verified')
+        result['issues'] = issues
+        result['status'] = 'not_passed' if issues else 'recovered_sampled_windows'
+    except BaseException as exc:
+        result['error'] = safe_error(exc)
+        raise
+    finally:
+        core.write_new(out/'observation.json', result)
+    return result
+
+
 async def observe(args):
     identity = checked_identity(args.identity, require_ready=False)
     if not all(identity['profiler_routes'].values()) or not identity['profile_overrides_supported']:
@@ -249,28 +310,9 @@ async def observe(args):
                         await stop_profile(identity)
                     after = await asyncio.to_thread(metrics, identity)
                     entry['cache_status'], issues = core.cache_miss_status(before, after, 1, prefix_policy(identity))
-                    files = [p for p in trace_dir.rglob(prefix+'*') if p.is_file()
-                             and (p.name.endswith('.trace.json') or p.name.endswith('.trace.json.gz'))]
-                    by_rank = {}
-                    for file in files:
-                        match = re.search(r'(?:^|_)tp([01])(?:_|\.|$)', file.name)
-                        if not match: continue
-                        rank = int(match.group(1))
-                        if rank in by_rank: raise ValueError('Multiple trace files for one rank/window')
-                        by_rank[rank] = file
-                    if set(by_rank) != {0, 1}: raise ValueError('Both rank traces must be exported before proceeding')
+                    by_rank = rank_trace_files(trace_dir, prefix)
                     for rank, file in by_rank.items():
-                        trace = core.read_trace(file)
-                        parsed = core.correlate_trace(trace, limit)
-                        del trace
-                        if name.startswith('decode') and any(re.search(r'context_[1-9]', n)
-                                                            for n in parsed['annotation_names']):
-                            parsed['issues'].append('Decode window includes context work; scheduling differs')
-                            parsed['status'] = 'incomplete'
-                        if name == 'prefill' and not any(re.search(r'context_[1-9]', n)
-                                                        for n in parsed['annotation_names']):
-                            parsed['issues'].append('Prefill not observed')
-                            parsed['status'] = 'incomplete'
+                        parsed = parse_window_trace(file, entry)
                         entry['ranks'][str(rank)] = dict(trace=str(file), sha256=client_api.sha(file),
                                                        summary={k: v for k, v in parsed.items() if k != 'signatures'})
                         core.write_new(out/f'{prefix}-rank-{rank}.json', parsed)
@@ -513,7 +555,7 @@ async def collect(args):
 def compact(value):
     result = {k: value[k] for k in ('schema', 'status', 'error', 'restore_error', 'identity_ready',
         'fingerprint', 'profiler_routes', 'profile_overrides_supported', 'unknown', 'parameters',
-        'summary', 'by_frequency', 'max_energy_relative_uncertainty',
+        'summary', 'by_frequency', 'max_energy_relative_uncertainty', 'issues',
         'scope_errors', 'restoration', 'sources', 'requests_per_window',
         'training_windows', 'independent_validation',
         'scope', 'temperature_range_c', 'observed_clock_ranges_mhz', 'identity_unknown',
@@ -566,6 +608,9 @@ def parser():
     pre.add_argument('--launch', action='store_true', help=argparse.SUPPRESS)
     ins = sub.add_parser('inspect'); ins.add_argument('--base-url', default=client_api.BASE_URL)
     ins.add_argument('--launch-dir'); ins.add_argument('--out', required=True)
+    offline = sub.add_parser('analyze-observation', help='Read existing traces without contacting the service')
+    offline.add_argument('--observation', required=True); offline.add_argument('--trace-dir', required=True)
+    offline.add_argument('--out', required=True)
     for name in ('observe', 'pilot', 'clock-check', 'collect'):
         cmd = sub.add_parser(name)
         cmd.add_argument('--identity', required=True); cmd.add_argument('--out', required=True)
@@ -603,6 +648,7 @@ def main(argv=None):
         elif args.command in ('observe', 'pilot', 'collect', 'clock-check'):
             function = {'observe': observe, 'pilot': pilot, 'collect': collect, 'clock-check': clock_check}[args.command]
             result = asyncio.run(function(args))
+        elif args.command == 'analyze-observation': result = analyze_observation(args)
         elif args.command == 'fit':
             result = core.fit(core.read(args.data)); core.write_new(Path(args.out)/'model.json', result)
         elif args.command == 'validate':

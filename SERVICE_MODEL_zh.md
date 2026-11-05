@@ -111,6 +111,23 @@ python -m rtx5090.service_model report --file "$OBS_OUT/observation.json" \
 
 原始 trace 永远留在目标机；不需要上传。未启用启动 capture trace，原生 capture 选项只有 rank 0，不能充当双 rank 完整映射。profiler 时间、活动时间和归属比例不能作为正式性能/能量标签。观察失败先处理本步；不要继续堆积新 trace。
 
+### 已导出 trace 的离线恢复（2026-11-05 文件名修复）
+
+目标机原生文件名实际为 `<prefix>_rank0.<timestamp>.pt.trace.json.gz` 和 rank1；早期工具只识别 `_tp0/_tp1`，会误报双 rank 文件缺失。修复同时支持两种命名，仍拒绝重复、缺卡和混入其它请求前缀。
+
+遇到该错误后更新代码，使用独立分析目录读取原始记录，无需重启服务或重采当前窗口：
+
+```bash
+RECOVER_OUT="${PROFILE_DIR}-observe-analysis-$(date +%Y%m%d-%H%M%S)"
+python -m rtx5090.service_model analyze-observation \
+  --observation "${PROFILE_DIR}-observe/observation.json" \
+  --trace-dir "$PROFILE_DIR" --out "$RECOVER_OUT"
+python -m rtx5090.service_model report \
+  --file "$RECOVER_OUT/observation.json" --section coverage
+```
+
+此命令仅离线解析现有窗口，不调用 HTTP，不改原失败状态。`recovered_sampled_windows` 只表示已有窗口的检查通过；只有一个 prefill 时不代表其余长度或 decode 已采集。`not_passed` 保留两 rank 的边界/关联问题，先处理这些证据再继续。
+
 ## 5. 当前步骤：只读双卡遥测试测
 
 复用已有 Windows NVML bridge 的遥测底层。桥接和 HTTP 是不同地址：服务仍是 `10.255.255.254:8000`，已连通的桥接回环是 `127.0.0.1:50900` 和 `:50901`，不修改网络。

@@ -3,6 +3,7 @@ import asyncio
 import copy
 from contextlib import redirect_stdout
 import io
+import gzip
 import json
 import os
 from pathlib import Path
@@ -160,6 +161,42 @@ class Models(unittest.TestCase):
 
 
 class Trace(unittest.TestCase):
+    def test_actual_rank_filenames_and_legacy_tp_names(self):
+        for naming in ('rank', 'tp'):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for rank in (0, 1):
+                    (root/f'svc_128_prefill_{naming}{rank}.1793848827164411804.pt.trace.json.gz').touch()
+                    (root/f'svc_128_prefill_{naming}{rank}.profiler_out.txt').touch()
+                self.assertEqual(set(cli.rank_trace_files(root, 'svc_128_prefill')), {0, 1})
+                (root/'svc_128_prefill_rank0.duplicate.trace.json').touch()
+                with self.assertRaisesRegex(ValueError, 'Multiple'):
+                    cli.rank_trace_files(root, 'svc_128_prefill')
+
+    def test_wrong_prefix_or_rank_does_not_fill_missing_card(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('svc_rank0.1.pt.trace.json', 'svc_other_rank1.1.pt.trace.json',
+                         'svc_rank10.1.pt.trace.json'):
+                (root/name).touch()
+            with self.assertRaisesRegex(ValueError, 'matched ranks=\\[0\\]'):
+                cli.rank_trace_files(root, 'svc')
+
+    def test_offline_recovery_keeps_failed_manifest_and_contacts_no_service(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(client, 'http', side_effect=AssertionError('HTTP forbidden')):
+            root = Path(tmp)
+            original = dict(schema=core.SCHEMA, status='failed', windows=[dict(prefix='svc',
+                length=128, requested_phase='decode_early', max_iterations=3, cache_status='verified_miss')])
+            core.write_new(root/'original.json', original)
+            for rank in (0, 1):
+                with gzip.open(root/f'svc_rank{rank}.123.pt.trace.json.gz', 'wt', encoding='utf-8') as f:
+                    json.dump(trace_fixture(tail_missing=rank == 1), f)
+            result = cli.analyze_observation(NS(observation=str(root/'original.json'), trace_dir=str(root), out=str(root/'analysis')))
+            self.assertEqual(result['status'], 'not_passed')
+            self.assertEqual(set(result['windows'][0]['ranks']), {'0', '1'})
+            self.assertEqual(core.read(root/'original.json'), original)
+            self.assertTrue((root/'analysis/svc-rank-1.json').is_file())
+
     def test_graph_one_launch_many_kernels(self):
         result = core.correlate_trace(trace_fixture(), 3)
         self.assertEqual(result['status'], 'boundary_checked')

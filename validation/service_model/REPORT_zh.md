@@ -23,6 +23,8 @@ bash -n scripts/serve_profiled_5090.sh
 
 ## 尚未完成的目标机验收
 
+2026-11-05 后续文件名修复：用户文本确认同一 prefill 窗口已导出 rank0/rank1 两份 gzip trace（387509/387498 bytes）。旧匹配只识别 `_tp`，现支持原生 `_rank`，新增 `analyze-observation` 离线恢复，不改原失败记录，不代表 trace 内容已经验收。新增 3 项检查；本次运行 `python -m unittest tests.test_service_model tests.test_observe_vllm -q`，72 项全部通过。此前完整回归日志仍保留为原交付记录。
+
 | 项目 | 本次证据 |
 | --- | --- |
 | 已安装 vLLM profiler 字段/原生迭代语义 | 源码检查与预检查工具已实现；目标安装待运行 |
