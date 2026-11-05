@@ -51,7 +51,11 @@ def sample_device(device, now=time.monotonic_ns):
     remote_end = max(t['end'] for t in times.values())
     # The remote query interval is enclosed by the local request interval.
     # Offset is an interval, NOT an equality between Windows and WSL clocks.
-    low, high = begin-remote_start, end-remote_end
+    resolution_s = raw.get('timestamp_clock', {}).get('resolution_s', 0)
+    positive(resolution_s, 'remote timestamp resolution', zero=True)
+    resolution_ns = math.ceil(resolution_s*1e9)
+    # Include documented timer quantization, never an arbitrary error allowance.
+    low, high = begin-remote_start-resolution_ns, end-remote_end+resolution_ns
     if high < low:
         raise ValueError('Remote elapsed time exceeds client bracket; incompatible clock units')
     offset, uncertainty = (low+high)/2, (high-low)/2

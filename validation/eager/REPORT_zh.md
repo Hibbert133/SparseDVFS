@@ -1,5 +1,12 @@
 # 2026-11-05 开发侧验收记录
 
+## 后续修复：Windows Python 3.8 桥接计时
+
+用户实机证据：Windows Python3.8.5的monotonic使用GetTickCount64，分辨率15.625ms；QPC perf_counter分辨率100ns。WSL往返约0.8–4.3ms，旧计时出现零时长或跨粗刻度，导致区间检查失败。
+NVML遥测整体与逐字段时间统一改为perf_counter_ns，记录计时器实现/分辨率；WSL映射将声明的分辨率纳入不确定性，保留不可能区间的拒绝及3%预算检查。
+新增3项CPU回归；完整discover共337项，322通过、15跳过。曾按包名运行既有test_5090时因其顶层fixture导入方式报错，改用项目discover入口后通过；未改该测试。
+需要重启两个只读bridge加载修复，不需要升级Python或重启vLLM。目标机重试结果尚未取得。
+
 分支：`5090_eager`，基点 `f7ba96d23881d7579a79a84fb90dd06c88f00e9e`。
 开发机Windows/Python3.14；不是Windows+WSL目标机。未访问目标机GPU、未重启模型、未写频。
 

@@ -73,11 +73,18 @@ class NVML:
         self._call('nvmlDeviceSetGpuLockedClocks', self.handle, C.c_uint(mhz), C.c_uint(mhz))
     def reset(self): self._call('nvmlDeviceResetGpuLockedClocks', self.handle)
     def telemetry(self):
-        result = dict(uuid=self.uuid, synthetic=False, timestamp_ns=time.monotonic_ns(),
-                      errors={}, field_query_times_ns={})
+        # CPython 3.8 on Windows uses 15.625ms GetTickCount64 for monotonic.
+        # QPC backs perf_counter even there. Keep ALL timestamps in one domain;
+        # the WSL client maps its offset from request/response brackets.
+        now = time.perf_counter_ns
+        clock = time.get_clock_info('perf_counter')
+        result = dict(uuid=self.uuid, synthetic=False, timestamp_ns=now(),
+                      errors={}, field_query_times_ns={},
+                      timestamp_clock=dict(name='perf_counter', implementation=clock.implementation,
+                                           resolution_s=clock.resolution))
         def query(key, name, kind, prefix=(), field=None):
             value = kind()
-            started = time.monotonic_ns()
+            started = now()
             try:
                 self._call(name, self.handle, *prefix, C.byref(value))
                 result[key] = getattr(value, field) if field else value.value
@@ -87,7 +94,7 @@ class NVML:
                 result['errors'][key] = str(exc)
                 return False
             finally:
-                result['field_query_times_ns'][key] = dict(start=started, end=time.monotonic_ns())
+                result['field_query_times_ns'][key] = dict(start=started, end=now())
         # Read graphics first to minimize the sync-to-core-query gap. Queries
         # are sequential, not an atomic hardware snapshot; times use this host.
         for key, name, kind, prefix in (

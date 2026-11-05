@@ -301,6 +301,34 @@ class Telemetry(unittest.TestCase):
         self.assertEqual(result['mapped']['energy_mj']['t_ns'], 5000055)
         self.assertEqual(result['mapped']['energy_mj']['uncertainty_ns'], 45)
 
+    def test_nvml_telemetry_uses_one_qpc_domain_not_coarse_monotonic(self):
+        from itertools import count
+        from rtx5090.backends import NVML
+        device = NVML.__new__(NVML)
+        device.uuid, device.handle = GPU_UUIDS[0], None
+        device._call = lambda *args: None  # CPU fixture, no driver invocation.
+        with patch('rtx5090.backends.time.perf_counter_ns', side_effect=count(1000000, 10000)), \
+             patch('rtx5090.backends.time.monotonic_ns', side_effect=AssertionError('coarse clock used')), \
+             patch('rtx5090.backends.time.get_clock_info', return_value=NS(implementation='QPC fixture', resolution=1e-7)):
+            result = telemetry.sample_device(device, now=iter([9000000, 10000000]).__next__)
+        self.assertEqual(result['raw']['timestamp_clock']['name'], 'perf_counter')
+        self.assertTrue(all(t['end'] > t['start'] for t in result['raw']['field_query_times_ns'].values()))
+
+    def test_remote_resolution_is_included_in_uncertainty(self):
+        device = NS(uuid=GPU_UUIDS[0], telemetry=lambda: dict(uuid=GPU_UUIDS[0], synthetic=False,
+            timestamp_ns=1000, timestamp_clock=dict(resolution_s=1e-7),
+            field_query_times_ns={'energy_mj': dict(start=1010, end=1050)}, energy_mj=1))
+        result = telemetry.sample_device(device, now=iter([5000, 5100]).__next__)
+        self.assertEqual(result['clock_offset_interval_ns'], [3900, 4150])
+        self.assertEqual(result['mapped']['energy_mj']['uncertainty_ns'], 145)
+
+    def test_impossible_remote_elapsed_still_rejected(self):
+        device = NS(uuid=GPU_UUIDS[0], telemetry=lambda: dict(uuid=GPU_UUIDS[0], synthetic=False,
+            timestamp_ns=0, timestamp_clock=dict(resolution_s=1e-7),
+            field_query_times_ns={'energy_mj': dict(start=0, end=15625000)}, energy_mj=1))
+        with self.assertRaisesRegex(ValueError, 'Remote elapsed'):
+            telemetry.sample_device(device, now=iter([0, 1000000]).__next__)
+
     def test_missing_remote_timestamp_rejected(self):
         class Device:
             uuid = GPU_UUIDS[0]
