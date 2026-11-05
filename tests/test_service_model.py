@@ -161,6 +161,28 @@ class Models(unittest.TestCase):
 
 
 class Trace(unittest.TestCase):
+    def test_resume_rechecks_original_traces_and_rejects_changed_identity_or_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ranks = {}
+            for rank in ('0', '1'):
+                file = root/f'svc_rank{rank}.pt.trace.json'
+                core.write_new(file, trace_fixture())
+                ranks[rank] = dict(trace=str(file), sha256=client.sha(file))
+            source = dict(schema=core.SCHEMA, status='recovered_sampled_windows', identity_fingerprint='boot',
+                windows=[dict(prefix='svc', length=128, requested_phase='decode_early', delay_iterations=2,
+                              max_iterations=3, cache_status='verified_miss', ranks=ranks)])
+            core.write_new(root/'source.json', source)
+            entries, done = cli.reuse_observation(root/'source.json', 'boot', root/'analysis')
+            self.assertEqual(done, {(128, 'decode_early')})
+            self.assertEqual(len(entries[0]['ranks']), 2)
+            self.assertEqual(core.read(root/'source.json'), source)
+            with self.assertRaisesRegex(ValueError, 'same service boot'):
+                cli.reuse_observation(root/'source.json', 'other-boot', root/'wrong-boot')
+            (root/'svc_rank1.pt.trace.json').write_text('{}', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'trace changed'):
+                cli.reuse_observation(root/'source.json', 'boot', root/'changed')
+
     def test_actual_rank_filenames_and_legacy_tp_names(self):
         for naming in ('rank', 'tp'):
             with tempfile.TemporaryDirectory() as tmp:

@@ -23,6 +23,8 @@ bash -n scripts/serve_profiled_5090.sh
 
 ## 尚未完成的目标机验收
 
+2026-11-05 续采修复：用户文本报告已有 128 prefill 双 rank 各 1 次 forward、1932 条 GPU 活动，边界检查通过，GPU 活动时间关联比例约 98.86%，该窗口 graph replay 未建立证据。新增 `observe --resume-observation`，复查源 trace 哈希、相位和服务身份后跳过已验收窗口；相关 CPU 回归 73 项全通过。用户证据仅覆盖此窗口，不能改写为完整路径或图模式验收。
+
 2026-11-05 后续文件名修复：用户文本确认同一 prefill 窗口已导出 rank0/rank1 两份 gzip trace（387509/387498 bytes）。旧匹配只识别 `_tp`，现支持原生 `_rank`，新增 `analyze-observation` 离线恢复，不改原失败记录，不代表 trace 内容已经验收。新增 3 项检查；本次运行 `python -m unittest tests.test_service_model tests.test_observe_vllm -q`，72 项全部通过。此前完整回归日志仍保留为原交付记录。
 
 | 项目 | 本次证据 |

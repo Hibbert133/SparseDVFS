@@ -128,6 +128,16 @@ python -m rtx5090.service_model report \
 
 此命令仅离线解析现有窗口，不调用 HTTP，不改原失败状态。`recovered_sampled_windows` 只表示已有窗口的检查通过；只有一个 prefill 时不代表其余长度或 decode 已采集。`not_passed` 保留两 rank 的边界/关联问题，先处理这些证据再继续。
 
+离线结果通过后可在同一常驻服务续采，复核身份、原 trace 哈希和双 rank 边界，跳过已验收窗口。新目录保存合并报告，旧目录不变：
+
+```bash
+NEXT_OBS="${PROFILE_DIR}-observe-continue-$(date +%Y%m%d-%H%M%S)"
+python -m rtx5090.service_model observe --identity "$ID_OUT/identity.json" \
+  --resume-observation "$RECOVER_OUT/observation.json" --out "$NEXT_OBS"
+```
+
+若仅 128 prefill 通过，输出 `reused_windows=1, remaining_windows=8`。仍执行窗口外预热，随后从 128 decode 早段开始采样。服务重启、源 trace 改动、未通过的源报告均拒绝复用。
+
 ## 5. 当前步骤：只读双卡遥测试测
 
 复用已有 Windows NVML bridge 的遥测底层。桥接和 HTTP 是不同地址：服务仍是 `10.255.255.254:8000`，已连通的桥接回环是 `127.0.0.1:50900` 和 `:50901`，不修改网络。

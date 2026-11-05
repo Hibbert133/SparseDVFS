@@ -279,6 +279,39 @@ def analyze_observation(args):
     return result
 
 
+def reuse_observation(path, fingerprint, out):
+    source = core.read(path)
+    if (source.get('schema') != core.SCHEMA or source.get('identity_fingerprint') != fingerprint
+            or source.get('status') not in ('recovered_sampled_windows', 'observed_sampled_windows')):
+        raise ValueError('Resume requires a checked observation from the same service boot')
+    entries, seen = [], set()
+    phases = {'prefill': (0, 1), 'decode_early': (2, 3), 'decode_tail': (62, 3)}
+    for old in source['windows']:
+        entry = dict(old, ranks={})
+        key = (entry['length'], entry['requested_phase'])
+        if (key in seen or key[0] not in core.LENGTHS or key[1] not in phases
+                or (entry['delay_iterations'], entry['max_iterations']) != phases[key[1]]
+                or entry.get('cache_status') != 'verified_miss'
+                or set(old.get('ranks', {})) != {'0', '1'}
+                or not re.fullmatch(r'[A-Za-z0-9_]+', entry['prefix'])):
+            raise ValueError('Resume window has invalid/duplicate workload or missing evidence')
+        parsed_ranks = {}
+        for rank, saved in old['ranks'].items():
+            file = Path(saved['trace'])
+            if client_api.sha(file) != saved['sha256']:
+                raise ValueError('Original trace changed since inspection')
+            parsed = parse_window_trace(file, entry)
+            if parsed['status'] != 'boundary_checked': raise ValueError('Resume trace boundary check failed')
+            parsed_ranks[rank] = parsed
+            entry['ranks'][rank] = dict(trace=str(file.resolve()), sha256=saved['sha256'],
+                summary={k: v for k, v in parsed.items() if k != 'signatures'})
+        for rank, parsed in parsed_ranks.items():
+            core.write_new(out/f'{entry["prefix"]}-rank-{rank}.json', parsed)
+        entry['reused_from'] = str(Path(path).resolve())
+        entries.append(entry); seen.add(key)
+    return entries, seen
+
+
 async def observe(args):
     identity = checked_identity(args.identity, require_ready=False)
     if not all(identity['profiler_routes'].values()) or not identity['profile_overrides_supported']:
@@ -288,6 +321,11 @@ async def observe(args):
     report = dict(schema=core.SCHEMA, status='failed', identity_fingerprint=identity['fingerprint'],
                   windows=[], scope='sampled_prefill_early_late_decode_not_entire_request_inventory')
     try:
+        completed = set()
+        if getattr(args, 'resume_observation', None):
+            report['windows'], completed = reuse_observation(args.resume_observation, identity['fingerprint'], out)
+            report['resume_source_sha256'] = digest(core.read(args.resume_observation))
+            emit(dict(reused_windows=len(completed), remaining_windows=9-len(completed)))
         async with client_api.BenchClient(identity['base_url'], model_id(identity)) as client:
             await stop_profile(identity)
             for li, length in enumerate(core.LENGTHS):
@@ -295,6 +333,7 @@ async def observe(args):
                 # Native WorkerProfiler.step starts delayed capture ON the selected
                 # forward. First forward is 1, so decode 1 starts at delay 2.
                 for name, delay, limit in (('prefill', 0, 1), ('decode_early', 2, 3), ('decode_tail', 62, 3)):
+                    if (length, name) in completed: continue
                     prefix = f'svc{uuid_module.uuid4().hex[:12]}_{length}_{name}'
                     request = client.prepare(length, int(digest([out.name, length, name])[:15], 16), prefix)
                     core.write_new(out/(prefix+'-request.json'), request)
@@ -614,6 +653,7 @@ def parser():
     for name in ('observe', 'pilot', 'clock-check', 'collect'):
         cmd = sub.add_parser(name)
         cmd.add_argument('--identity', required=True); cmd.add_argument('--out', required=True)
+        if name == 'observe': cmd.add_argument('--resume-observation')
         if name != 'observe': cmd.add_argument('--telemetry', required=True)
         if name == 'pilot': cmd.add_argument('--requests', type=int, default=20)
         if name in ('clock-check', 'collect'): cmd.add_argument('--apply', action='store_true')
