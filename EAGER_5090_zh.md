@@ -155,6 +155,9 @@ python -B -m rtx5090.eager validate --data "$EAGER_RUN/validation/dataset.json" 
 
 ## 运行失败与结果解释
 
+- 旧服务硬件诊断可使用 `rtx5090.service_model clock-check --diagnose-mhz 2250`（仍需 identity、telemetry、独立 out、`--apply --ack-default-auto`）。只运行该频点与带载正常恢复；成功状态为 `diagnostic_passed`，不能用于固定频率采集的完整验收证书。未执行异常/断连恢复验收。
+- 首轮频率稳定检查无论成功或失败均保存 `settle-<MHz>.json` 的逐次双卡读回；保持 5 秒、15 MHz 容差与连续三次达标要求，不通过扩大容差掩盖失配。
+
 - 任一卡失败：恢复两个已触碰的设备；API reset返回与实际恢复分开保存。恢复失败/未验证先处理，不能直接继续下一个调频命令。
 - worker在执行中出错会标记poisoned；不会偷偷清状态、退回mock或自动重启。对端会合超时后不再释放新块。
 - 若rank在底层CUDA/collective中挂起，Python不能保证强制解挂；需要用户正常停止自己的实验并核查双卡恢复。不得宣称任意硬故障都能自动恢复。

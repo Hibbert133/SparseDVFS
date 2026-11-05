@@ -187,7 +187,7 @@ async def load_frames(client, devices, seed, prefix, artifact=None):
     return sampler.frames
 
 
-async def settle(client, devices, target, seed, prefix):
+async def settle(client, devices, target, seed, prefix, artifact=None):
     await asyncio.sleep(.5)
     deadline, consecutive, records, count = time.monotonic()+5, 0, [], 0
     task = None
@@ -205,7 +205,12 @@ async def settle(client, devices, target, seed, prefix):
             await asyncio.sleep(.1)
         raise RuntimeError('Both clocks did not settle within 5s; no measurement retry')
     finally:
-        if task: await task  # finish the finite unmeasured load; never cancel a live request mid-work
+        try:
+            if task: await task  # finish the finite unmeasured load; never cancel a live request mid-work
+        finally:
+            if artifact:
+                core.write_new(artifact, dict(target_mhz=target, frames=records,
+                    consecutive=consecutive, requests=count, settled=consecutive >= 3))
 
 
 async def restore_checked(controller, client, devices, baseline, seed, prefix, artifact=None):
@@ -408,13 +413,17 @@ async def pilot(args, *, identity=None):
 async def clock_check(args, *, identity=None):
     if not args.apply or not args.ack_default_auto:
         raise ValueError('Clock acceptance requires --apply and --ack-default-auto')
+    diagnostic = getattr(args, 'diagnose_mhz', None)
+    if diagnostic is not None and diagnostic not in (2250, 2527):
+        raise ValueError('Only the two declared frequency candidates may be diagnosed')
     identity = checked_identity(args.identity) if identity is None else identity
     config = core.read(args.telemetry)
     if any(r['backend'] != 'bridge' for r in config):
         raise ValueError('This Windows/WSL clock gate requires bridge disconnect recovery on both cards')
     out = fresh(args.out)
     result = dict(schema=identity.get('schema', core.SCHEMA), status='failed', identity_fingerprint=identity['fingerprint'],
-                  telemetry_config_sha256=digest(config), cases=[], synthetic=False)
+                  telemetry_config_sha256=digest(config), cases=[], synthetic=False,
+                  diagnostic_only=diagnostic is not None, requested_diagnostic_mhz=diagnostic)
     devices = []
     controller = telemetry.DualClocks(devices, apply=True)
     baseline = []
@@ -426,9 +435,10 @@ async def clock_check(args, *, identity=None):
             baseline = await load_frames(client, devices, 910000, 'clock-baseline-'+out.name)
             core.write_new(out/'baseline.json', baseline)
             try:
-                for i, target in enumerate((2527, 2250)):
+                for i, target in enumerate((diagnostic,) if diagnostic is not None else (2527, 2250)):
                     controller.set(target)
-                    pre = await settle(client, devices, target, 911000+i*100, 'clock-settle-'+str(target))
+                    pre = await settle(client, devices, target, 911000+i*100, 'clock-settle-'+str(target),
+                                       artifact=out/f'settle-{target}.json')
                     frames = await load_frames(client, devices, 912000+i*100, 'clock-loaded-'+str(target))
                     core.write_new(out/f'clock-{target}.json', dict(precheck=pre, loaded=frames))
                     # Loaded points only for acceptance; formal windows check every interior readback.
@@ -442,6 +452,9 @@ async def clock_check(args, *, identity=None):
                     await restore_checked(controller, client, devices, baseline, 913000,
                                           'clock-normal-restore', out/'normal-restore.json')
                     result['normal_restoration'] = dict(controller.restore_result)
+            if diagnostic is not None:
+                result.update(status='diagnostic_passed', full_clock_gate_passed=False)
+                return result  # finally still persists restoration and closes devices.
             # A controlled Python exception tests the same finally path as a client abort.
             try:
                 controller.set(2250)
@@ -657,7 +670,10 @@ def parser():
         if name != 'observe': cmd.add_argument('--telemetry', required=True)
         if name == 'pilot': cmd.add_argument('--requests', type=int, default=20)
         if name in ('clock-check', 'collect'): cmd.add_argument('--apply', action='store_true')
-        if name == 'clock-check': cmd.add_argument('--ack-default-auto', action='store_true')
+        if name == 'clock-check':
+            cmd.add_argument('--ack-default-auto', action='store_true')
+            cmd.add_argument('--diagnose-mhz', type=int, choices=(2250, 2527),
+                             help='Single candidate plus normal restoration; never a full clock gate')
         if name == 'collect':
             cmd.add_argument('--pilot', required=True); cmd.add_argument('--split', choices=['train', 'validation'], required=True)
             cmd.add_argument('--seed', type=int, required=True); cmd.add_argument('--model')
