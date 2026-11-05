@@ -14,7 +14,9 @@ from .backends import NVML, Mock
 class Session:
     def __init__(self, device, token):
         self.device, self.token, self.seq = device, token, 0
-        self.rates = device.probe()['rates_mhz']
+        # Read-only telemetry must work even when clock-control enumeration is
+        # unsupported. Query the writable grid only for an explicit set request.
+        self.rates = None
         self.dirty = False
     def handle(self, req):
         if not hmac.compare_digest(str(req.get('token', '')), self.token): raise ValueError('Authentication failed')
@@ -26,6 +28,7 @@ class Session:
         if op == 'telemetry': return self.device.telemetry()
         if op == 'set':
             mhz = req.get('mhz')
+            if self.rates is None: self.rates = self.device.probe()['rates_mhz']
             if type(mhz) is not int or mhz not in self.rates: raise ValueError('Unapproved GPU MHz')
             self.dirty = True; self.device.set(mhz)
             return dict(requested_mhz=mhz, observed_mhz=self.device.read(), settled=False)
@@ -121,16 +124,18 @@ def main():
     p=argparse.ArgumentParser(); p.add_argument('--uuid', required=True); p.add_argument('--port', type=int, default=50900)
     p.add_argument('--log', default='bridge.jsonl'); p.add_argument('--mock', action='store_true')
     p.add_argument('--apply', action='store_true', help='Explicitly permit clock writes from authenticated control clients')
+    p.add_argument('--read-only', action='store_true', help='Telemetry only; no assumption about initial automatic clocks')
     p.add_argument('--ack-default-auto', action='store_true'); a=p.parse_args()
     token=os.environ.get('SPARSEDVFS_BRIDGE_TOKEN', '')
     if len(token)<32: p.error('Set a random SPARSEDVFS_BRIDGE_TOKEN of at least 32 characters')
-    if not a.mock and not a.ack_default_auto: p.error('Start with automatic GPU clocks and pass --ack-default-auto')
+    if a.read_only and a.apply: p.error('--read-only and --apply are mutually exclusive')
+    if not a.mock and not a.read_only and not a.ack_default_auto: p.error('Start with automatic GPU clocks and pass --ack-default-auto')
     lock=DeviceLock(a.uuid)
     device=None
     # Windows bind owns the port exclusively across bridge processes. WSL must use mirrored networking.
     try:
         device=Mock(uuid=a.uuid) if a.mock else NVML(a.uuid)
-        with Server(('127.0.0.1',a.port),device,token,a.log,allow_apply=a.apply or a.mock) as server: server.serve_forever()
+        with Server(('127.0.0.1',a.port),device,token,a.log,allow_apply=(a.apply or a.mock) and not a.read_only) as server: server.serve_forever()
     finally:
         try:
             if device: device.close()

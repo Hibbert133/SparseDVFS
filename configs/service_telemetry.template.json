@@ -1,0 +1,14 @@
+[
+  {
+    "backend": "bridge",
+    "uuid": "GPU-22d1cd22-d198-45c4-2b54-974484026ab5",
+    "host": "127.0.0.1",
+    "port": 50900
+  },
+  {
+    "backend": "bridge",
+    "uuid": "GPU-e2f02606-bac6-52cd-f8a1-15a027db7da0",
+    "host": "127.0.0.1",
+    "port": 50901
+  }
+]

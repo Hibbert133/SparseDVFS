@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-05",
+  "python": "3.14.5",
+  "platform": "Windows-2022Server-10.0.20348-SP0",
+  "test_modules": [
+    "test_service_model",
+    "test_observe_vllm",
+    "test_performance_eq1",
+    "test_5090",
+    "test_energy_5090",
+    "test_experiment_5090"
+  ],
+  "run": 133,
+  "passed": 128,
+  "failures": 0,
+  "errors": 0,
+  "skipped": [
+    {
+      "test": "test_5090_worker_schedule_and_native_core_joined (test_5090.Native5090Tests.test_5090_worker_schedule_and_native_core_joined)",
+      "reason": "Linux native library required"
+    },
+    {
+      "test": "test_actual_native_controller_over_persistent_bridge (test_5090.Native5090Tests.test_actual_native_controller_over_persistent_bridge)",
+      "reason": "Linux native library required"
+    },
+    {
+      "test": "test_backend_error_propagation_and_restore (test_5090.Native5090Tests.test_backend_error_propagation_and_restore)",
+      "reason": "Linux native library required"
+    },
+    {
+      "test": "test_ticket_stale_and_unchanged (test_5090.Native5090Tests.test_ticket_stale_and_unchanged)",
+      "reason": "Linux native library required"
+    },
+    {
+      "test": "test_units_dedup_queue_cancel_and_reset (test_5090.Native5090Tests.test_units_dedup_queue_cancel_and_reset)",
+      "reason": "Linux native library required"
+    }
+  ],
+  "target_CUDA_tested": false,
+  "target_service_tested": false,
+  "physical_clock_restore_verified": false,
+  "measured_energy_fitted": false
+}
