@@ -99,14 +99,19 @@ def main():
     p.add_argument('--out',required=True); p.add_argument('--seed',type=int,default=11062700)
     p.add_argument('--windows-python',default='/mnt/c/ProgramData/Anaconda3/python.exe')
     p.add_argument('--apply',action='store_true'); p.add_argument('--ack-default-auto',action='store_true')
+    p.add_argument('--frozen',help='Bind holdout acquisition to an already frozen candidate file')
     args=p.parse_args()
     if not args.apply or not args.ack_default_auto: p.error('Require --apply and --ack-default-auto for restoration to default policy')
     import fcntl
     identity=eager.checked(args.identity)
+    frozen=read(args.frozen) if args.frozen else None
+    if frozen and frozen['identity_fingerprint']!=identity['fingerprint']:
+        raise ValueError('Frozen candidate service identity changed')
     with (Path(identity['runtime'])/'client.lock').open('a') as lease:
         fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
         out=service.fresh(args.out)
         result=dict(status='failed',identity_fingerprint=identity['fingerprint'],windows=[],
+                    frozen_sha256=digest(frozen) if frozen else None,
                     commit=eager.git('rev-parse','HEAD'),telemetry_config_sha256=digest(read(args.telemetry)),
                     clock_writes=True, exact_lock_verified=False, dvfs_validated=False,
                     restoration=dict(required=False,verified=False))
