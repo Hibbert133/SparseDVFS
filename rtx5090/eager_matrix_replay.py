@@ -34,6 +34,21 @@ def compare_sequences(source, replay):
         scope='isolated_instrumented_original_vs_same_tensor_replay_not_cache_equivalence')
 
 
+def compare_capture_evidence(source, replay):
+    """Missing/ambiguous profiler evidence invalidates the audit, not inference.
+
+    Call only after both original and replay CUDA operations completed. Do not
+    catch CUDA execution, profiler lifecycle, or I/O failures here.
+    """
+    try:
+        return compare_sequences(source, replay)
+    except ValueError as exc:
+        return dict(source_sequence=[], replay_sequence=[], source_kernel_counts={},
+                    names_counts_order_match=False, launch_geometry_match=False,
+                    evidence_error=str(exc),
+                    scope='invalid_capture_evidence_no_retry_no_kernel_equivalence_claim')
+
+
 def batch_scaling(batches):
     """Independent count holdout; diagnostic only, NOT physical Eq1 overhead."""
     for b in batches:
@@ -146,7 +161,7 @@ class MatrixReplay:
                 result, original_trace = capture('original')
                 extra, replay_trace = capture('replay')
                 del extra
-                match = compare_sequences(original_trace, replay_trace)
+                match = compare_capture_evidence(original_trace, replay_trace)
                 del original_trace, replay_trace
             else:
                 result = func(*args, **kwargs)

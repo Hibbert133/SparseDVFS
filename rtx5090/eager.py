@@ -259,6 +259,7 @@ async def observe(args):
                     module_source=row['parent'], pytorch_operator='aten.linear.default',
                     kernel_names_verified=row['kernel_names_verified'],
                     kernel_sequence=row.get('kernel_comparison', {}).get('source_sequence'),
+                    kernel_evidence_error=row.get('kernel_comparison', {}).get('evidence_error'),
                     batch_scaling=row.get('batch_scaling'),
                     evidence_file=str(out/f"rank-{report['rank']}-matrix-replay.json"))
                     for report in result['matrix_replay'] for row in report['rows']]
@@ -272,6 +273,8 @@ async def observe(args):
             result['cache_isolation'].update(miss_verified=True,
                 evidence='both_rank_context_key_requires_admitted_zero_and_full_512_prefill')
             result['status'] = 'complete'
+            if result.get('kernel_mapping_passed') is False or result.get('kernel_launch_geometry_passed') is False:
+                result.update(status='failed', error='Kernel capture evidence missing or mismatched; inference completed, calibration rejected')
     except BaseException as exc:
         result.update(status='failed', error=safe_error(exc)); raise
     finally:

@@ -3,7 +3,7 @@ import sys
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
-from rtx5090.eager_matrix_replay import case_spec, validate_rows, MatrixReplay, compare_sequences, batch_scaling
+from rtx5090.eager_matrix_replay import case_spec, validate_rows, MatrixReplay, compare_sequences, compare_capture_evidence, batch_scaling
 from rtx5090.eager import parser
 
 
@@ -13,6 +13,16 @@ def meta(shape):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_empty_capture_invalidates_evidence_without_raising(self):
+        result = compare_capture_evidence({'traceEvents': []}, {'traceEvents': []})
+        self.assertFalse(result['names_counts_order_match'])
+        self.assertFalse(result['launch_geometry_match'])
+        self.assertIn('No CUDA kernels', result['evidence_error'])
+
+    def test_capture_wrapper_does_not_swallow_execution_errors(self):
+        with patch('rtx5090.eager_matrix_replay.compare_sequences', side_effect=RuntimeError('CUDA failure')):
+            with self.assertRaises(RuntimeError): compare_capture_evidence({}, {})
+
     def test_kernel_order_multiplicity_and_geometry(self):
         def trace(names):
             return dict(traceEvents=[dict(cat='kernel',ph='X',name=n,ts=i,
