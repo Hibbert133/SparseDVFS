@@ -110,8 +110,13 @@ def run(args):
             if str(torch.__version__) != worker['torch_version'] or torch.version.cuda != worker['torch_cuda']:
                 raise ValueError('Probe/worker PyTorch or CUDA version differs')
             result['free_mib_after_context'] = torch.cuda.mem_get_info()[0] // 2**20
-            if result['free_mib_after_context'] < 1024:
-                raise RuntimeError('Require 1024 MiB free after context initialization')
+            result['nvml_free_mib_after_context'] = free_mib(uuid)
+            result['conservative_free_mib_after_context'] = min(result['free_mib_after_context'],
+                                                               result['nvml_free_mib_after_context'])
+            result['memory_sources_disagree'] = abs(result['free_mib_after_context']-
+                                                     result['nvml_free_mib_after_context']) > 256
+            if result['conservative_free_mib_after_context'] < 1024:
+                raise RuntimeError('Require both NVML and CUDA to report 1024 MiB free after context initialization')
             torch.manual_seed(110601)
             for job in jobs:
                 key = job['phase']+'-'+job['module']

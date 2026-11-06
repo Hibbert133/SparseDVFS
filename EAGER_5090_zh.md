@@ -113,6 +113,23 @@ python -B -m rtx5090.eager observe --identity "$EAGER_RUN/identity.json" \
 
 ## 4. eager 本轮硬件验收与最早可得实测结果
 
+### 当前频率批量参考（无需写频、无需重启）
+
+`python -B -m rtx5090.eager_baseline --identity <现有eager身份> --telemetry configs/service_telemetry.template.json --requests 20 --seed 1106000 --out <新目录>`
+
+2026-11-06新增：一次20请求pilot，随后3个reference窗及3个不同请求的holdout窗。
+全部固定512输入、64输出、并发1，窗口内关闭profiler及详细观察；核实同一常驻双rank身份。
+独立缓存盐只负责请求隔离，真实metrics必须验证无cache命中且无额外请求；不因此放松正式配对比较的门槛。
+pilot通过后冻结累计能量/功率来源、显存频率参考和请求数，不自动扩窗或重试。
+每窗写原始遥测、请求、回复与摘要，最终写 `baseline.json` 和 `REPORT.txt`；失败也保留已完成窗口。
+它没有写频或检查锁频状态，所以条件名为 `current_policy_not_verified_AUTO`，不能称为正式AUTO验收。
+6个独立窗口是重复性参考，未拟合模型，不把holdout名称当作模型已通过验证；不能用于宣称Eq1/Eq2或节能收益。
+当前97项相关CPU检查通过，目标机批量能量结果待运行。
+
+另：rank0 probe实机已匹配四个kernel名称集合，用户离线核对8192次相应算子的kernel次数全部一致。
+实际缓存、顺序和rank1仍未通过。该次CUDA可用显存报告30535 MiB，与NVML的2755 MiB冲突；
+后续probe在CUDA初始化后同时查询NVML，取两者较小值进行1024 MiB余量检查，不将CUDA读数当作物理显存已释放。
+
 `TEL` 是审核过的实际双卡遥测JSON（模板没有凭据）：
 
 ```bash
