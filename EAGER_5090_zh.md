@@ -141,6 +141,20 @@ Windows模式兼容现有Python3.8；不通过bridge逐样本传输，不写频�
 `loaded_host_sampling_passed`仅说明该次负载期间本地间断检查通过，未完成跨系统能量窗口对齐，
 不得把采集全程累计能量称为20请求能量。3项CPU检查含就绪→20请求→结束时序及Python3.8语法检查通过。
 
+### Windows本地统一能量窗口
+
+目标机随后完成20请求带载检查：两卡852个样本，最大间隔约126 ms，均未超过350 ms。
+新增 `python -B -m rtx5090.host_reference --identity <身份> --out <新目录>`：
+Windows本地QPC在首帧之后、发送ready之前定义窗口起点，在收到WSL完成通知之后定义终点；
+停止标记后额外采集一帧，确保两卡计数能夹住统一窗口边界。能量按此Windows本地窗口计算，
+包含跨系统ready/finish协调及等待期间的板级能量，不是原先精确WSL请求区间的能量。
+两侧时钟不互相映射；独立记录host_window_s、wsl_window_s，禁止把两个不同区间的E/T混算。
+严格使用双卡累计计数，保持100 ms采样、350 ms最大间断与3%时间/量化预算，检查计数单调、
+两端覆盖、真实usage、cache miss、无额外请求、同一双rank身份和恒定显存频率。
+一条命令执行20请求pilot及6个独立窗口，失败即保存并停止，不重试；每窗保存原始数据，最终REPORT.txt汇总。
+该新协议单独标记host_envelope_reference；不能与旧失败窗口拼接，也不是Eq1/Eq2、正式AUTO或DVFS验证。
+66项相关CPU检查通过，目标机能量验收待执行。
+
 另：rank0 probe实机已匹配四个kernel名称集合，用户离线核对8192次相应算子的kernel次数全部一致。
 实际缓存、顺序和rank1仍未通过。该次CUDA可用显存报告30535 MiB，与NVML的2755 MiB冲突；
 后续probe在CUDA初始化后同时查询NVML，取两者较小值进行1024 MiB余量检查，不将CUDA读数当作物理显存已释放。

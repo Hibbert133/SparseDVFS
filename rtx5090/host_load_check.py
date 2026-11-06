@@ -41,6 +41,7 @@ def host(args):
     devices, frames, errors = [], [], []
     ready, stop = threading.Event(), threading.Event()
     thread = None
+    window_start, window_end = None, None
     def sample():
         try:
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -49,7 +50,11 @@ def host(args):
                     begin = time.perf_counter()
                     frames.append(list(pool.map(lambda d: d.telemetry(), devices)))
                     ready.set()
-                    if stop.is_set(): break  # this includes a post-stop frame
+                    if stop.is_set():
+                        # Stop can arrive during an in-flight query. Take a new
+                        # complete frame AFTER observing stop to bracket the end.
+                        frames.append(list(pool.map(lambda d: d.telemetry(), devices)))
+                        break
                     if time.perf_counter() >= deadline:
                         raise TimeoutError('Host sampling watchdog expired')
                     stop.wait(max(0, .1-(time.perf_counter()-begin)))
@@ -61,8 +66,11 @@ def host(args):
         thread.start()
         if not ready.wait(15) or errors:
             raise RuntimeError('Host sampler failed to become ready: '+str(errors))
-        print(json.dumps(dict(status='host_ready', pid=os.getpid())), flush=True)
+        window_start = time.perf_counter_ns()
+        print(json.dumps(dict(status='host_ready', pid=os.getpid(),
+                              host_window_start_ns=window_start)), flush=True)
         if input() != 'finish': raise ValueError('Expected finish command')
+        window_end = time.perf_counter_ns()
     finally:
         stop.set()
         if thread: thread.join(timeout=15)
@@ -72,7 +80,9 @@ def host(args):
                 try: device.close()
                 except Exception as exc: errors.append(str(exc))
             save(out/'windows-samples.json', dict(frames=frames, errors=errors,
-                clock_domain='Windows_perf_counter_ns', energy_window_aligned=False))
+                clock_domain='Windows_perf_counter_ns', energy_window_aligned=False,
+                host_window_start_ns=window_start, host_window_end_ns=window_end,
+                host_window_scope='encloses_WSL_load_includes_ready_and_finish_coordination'))
         else:
             save(out/'windows-sampling-failure.json', dict(errors=errors))
     rows = summarize(frames, GPU_UUIDS)
@@ -97,13 +107,16 @@ async def workload(args, out, result):
     with (out/'windows-stderr.log').open('wb') as stderr:
         try:
             async with client_api.BenchClient(identity['base_url'], service.model_id(identity)) as client:
-                await service.warmup(client, 512, 1109000, out.name+'-warm')
-                requests = service.prepared(client, 512, 1109100, 20, out.name)
+                seed = getattr(args, 'seed', 1109100)
+                await service.warmup(client, 512, seed+1000000, out.name+'-warm')
+                requests = service.prepared(client, 512, seed, 20, out.name)
                 isolation = await eager.isolate_observation_cache(identity, requests[0])
                 if isolation['method'] == 'unique_request_cache_salt':
                     import secrets
                     for request in requests: request['cache_salt'] = secrets.token_hex(32)
                 save(out/'requests.json', requests)
+                if getattr(args, 'verify_metrics', False):
+                    result['metrics_before'] = await asyncio.to_thread(service.metrics, identity)
                 host_process = await asyncio.create_subprocess_exec(args.windows_python, '-B', '-m',
                     'rtx5090.host_load_check', '--host', '--out', winpath(out),
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr, env=env)
@@ -130,6 +143,11 @@ async def workload(args, out, result):
                         host_process.kill()
                         await host_process.wait()
     eager.checked(args.identity)
+    if getattr(args, 'verify_metrics', False):
+        from .service_core import cache_miss_status
+        result['metrics_after'] = await asyncio.to_thread(service.metrics, identity)
+        result['cache_status'], result['cache_errors'] = cache_miss_status(
+            result['metrics_before'], result['metrics_after'], 20, service.prefix_policy(identity))
     host_report = json.loads((out/'windows-summary.json').read_text(encoding='utf-8'))
     result['by_uuid'] = host_report['by_uuid']
     if result.get('host_exit_code') != 0 or host_report['status'] != 'host_sampling_complete':
