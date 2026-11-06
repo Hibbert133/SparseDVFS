@@ -11,6 +11,14 @@ from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
 
 
+def reserve_prompts(requests, excluded):
+    hashes=[r['prompt_hash'] for r in requests]
+    if len(hashes)!=20 or len(set(hashes))!=20 or set(hashes)&excluded:
+        raise ValueError('Planned holdout repeats previous prompts; stopped BEFORE clock writes')
+    excluded.update(hashes)
+    return hashes
+
+
 def changed_readbacks(data, baseline, target, previous=None):
     result={}
     for uuid in GPU_UUIDS:
@@ -38,11 +46,23 @@ async def collect(args, identity, out, result):
     controller=telemetry.DualClocks(devices,apply=True)
     baseline=[]
     try:
+        targets=(args.only_mhz,) if getattr(args,'only_mhz',None) else (2527,2250)
+        planned={}
         async with service_client.BenchClient(identity['base_url'], service.model_id(identity)) as client:
+            if getattr(args,'frozen',None):
+                excluded=set(read(args.frozen)['excluded_prompt_hashes'])
+                if getattr(args,'exclude_collection',None):
+                    for path in Path(args.exclude_collection).glob('requested-*/requests.json'):
+                        excluded.update(r['prompt_hash'] for r in read(path))
+                for i,target in enumerate(targets):
+                    name='requested-'+str(target)
+                    requests=service.prepared(client,512,args.seed+100+i*100,20,name)
+                    planned[name]=reserve_prompts(requests,excluded)
+                write_new(out/'planned-prompt-hashes.json',planned)
             baseline=await service.load_frames(client,devices,args.seed,'eq2-baseline-'+out.name,out/'baseline.json')
         previous=None
         try:
-            for i,target in enumerate((2527,2250)):
+            for i,target in enumerate(targets):
                 name='requested-'+str(target)
                 folder=out/name; folder.mkdir()
                 row=dict(status='failed',replies=[])
@@ -53,6 +73,8 @@ async def collect(args, identity, out, result):
                     current=SimpleNamespace(identity=args.identity,windows_python=args.windows_python,
                                             seed=args.seed+100+i*100,verify_metrics=True,voltage=True)
                     await workload(current,folder,row)
+                    if planned and [r['prompt_hash'] for r in read(folder/'requests.json')]!=planned[name]:
+                        raise ValueError('Actual requests differ from checked plan')
                     if row['status']!='loaded_host_sampling_passed' or row.get('cache_status')!='verified_miss':
                         raise ValueError('Sampling/cache gate failed')
                     data=read(folder/'windows-samples.json')
@@ -100,6 +122,8 @@ def main():
     p.add_argument('--windows-python',default='/mnt/c/ProgramData/Anaconda3/python.exe')
     p.add_argument('--apply',action='store_true'); p.add_argument('--ack-default-auto',action='store_true')
     p.add_argument('--frozen',help='Bind holdout acquisition to an already frozen candidate file')
+    p.add_argument('--only-mhz',type=int,choices=[2527,2250],help='Collect only a missing holdout condition')
+    p.add_argument('--exclude-collection',help='Exclude every prompt from a previous attempt')
     args=p.parse_args()
     if not args.apply or not args.ack_default_auto: p.error('Require --apply and --ack-default-auto for restoration to default policy')
     import fcntl
@@ -115,7 +139,7 @@ def main():
                     commit=eager.git('rev-parse','HEAD'),telemetry_config_sha256=digest(read(args.telemetry)),
                     clock_writes=True, exact_lock_verified=False, dvfs_validated=False,
                     restoration=dict(required=False,verified=False))
-        write_new(out/'protocol.json',dict(requested_mhz=[2527,2250],requests=20,input=512,output=64,
+        write_new(out/'protocol.json',dict(requested_mhz=[args.only_mhz] if args.only_mhz else [2527,2250],requests=20,input=512,output=64,
                    frequency_label='actual_synchronous_readbacks_not_requested_setpoint',
                    scope='diagnostic_excitation_not_fixed_clock_acceptance',seed=args.seed))
         try: asyncio.run(collect(args,identity,out,result))

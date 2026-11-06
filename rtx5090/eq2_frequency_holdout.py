@@ -41,20 +41,23 @@ def freeze(a):
     print('Frozen candidates:',a.out); print('SHA256:',digest(value))
 
 
-def require_manifest(manifest,frozen):
+def require_manifest(manifest,frozen,names=None):
     if (manifest['status']!='complete' or not manifest['restoration']['verified'] or
         manifest['identity_fingerprint']!=frozen['identity_fingerprint'] or
-        manifest.get('frozen_sha256')!=digest(frozen) or manifest['windows']!=NAMES):
+        manifest.get('frozen_sha256')!=digest(frozen) or manifest['windows']!=(names or NAMES)):
         raise ValueError('Require complete fresh holdout bound to frozen parameters and verified restoration')
 
 
 def check(a):
     frozen=read(a.frozen); source=Path(a.collection); manifest=read(source/'collection.json')
     require_manifest(manifest,frozen)
+    replacement=Path(a.replacement_2527) if getattr(a,'replacement_2527',None) else None
+    replacement_manifest=read(replacement/'collection.json') if replacement else None
+    if replacement: require_manifest(replacement_manifest,frozen,['requested-2527'])
     excluded=set(frozen['excluded_prompt_hashes'])
     windows=[]
     for name in NAMES:
-        folder=source/name
+        folder=(replacement if replacement and name=='requested-2527' else source)/name
         hashes=request_hashes(folder)
         if hashes & excluded: raise ValueError('Holdout repeats previous prompts')
         excluded.update(hashes)
@@ -65,6 +68,7 @@ def check(a):
         if energy['quality_errors']: raise ValueError(str(energy['quality_errors']))
         windows.append((name,data,energy))
     report=dict(status='frozen_frequency_holdout_scored',frozen_sha256=digest(frozen),
+                replacement_2527_manifest_sha256=digest(replacement_manifest) if replacement else None,
                 collection_sha256=digest(manifest),parameters_updated=False,
                 equation_2_parameters_validated=False,restoration_verified=True,ranks=[],
                 caveat='One window per condition; measured V/T/f/duration inputs, board scope only; ranges are not confidence intervals')
@@ -103,6 +107,7 @@ def main():
     f=sub.add_parser('freeze')
     for name in ('audit','source','training-extra','out'): f.add_argument('--'+name,required=True)
     c=sub.add_parser('check')
+    c.add_argument('--replacement-2527',help='Use a separately restored fresh window instead of duplicated original 2527 window')
     for name in ('frozen','collection','out'): c.add_argument('--'+name,required=True)
     a=p.parse_args(); (freeze if a.command=='freeze' else check)(a)
 

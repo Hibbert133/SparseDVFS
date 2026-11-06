@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from rtx5090.eq2_supplement import changed_readbacks, collect
+from rtx5090.eq2_supplement import changed_readbacks, collect, reserve_prompts
 from rtx5090.observe_core import GPU_UUIDS
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -10,6 +10,15 @@ import tempfile
 
 
 class ReadbackTests(unittest.TestCase):
+    def test_duplicate_prompt_plan_rejected(self):
+        requests=[dict(prompt_hash=str(i)) for i in range(20)]
+        with self.assertRaisesRegex(ValueError,'BEFORE clock writes'):
+            reserve_prompts(requests,{'3'})
+        excluded=set()
+        reserve_prompts(requests,excluded)
+        self.assertEqual(len(excluded),20)
+        with self.assertRaises(ValueError): reserve_prompts(requests,excluded)
+
     def test_lower_and_distinct_actual_conditions(self):
         baseline=[[dict(uuid=u,raw=dict(clock_mhz=2850,utilization_pct=80)) for u in GPU_UUIDS]]*4
         def frames(f):
