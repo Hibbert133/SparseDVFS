@@ -223,6 +223,9 @@ def coverage(directory, identity):
 
 async def observe(args):
     identity = checked(args.identity)
+    replay = getattr(args, 'matrix_replay', False)
+    if replay and any(r.get('matrix_replay_version') != 1 for r in identity['ranks']):
+        raise ValueError('Running workers lack matrix replay. Prepare/check new launcher before a user-operated restart.')
     out = service.fresh(args.out)
     result = dict(schema=core.SCHEMA, status='failed', identity_fingerprint=identity['fingerprint'])
     try:
@@ -233,10 +236,23 @@ async def observe(args):
             result['client_provenance'] = dict(commit=git('rev-parse', 'HEAD'),
                 eager_sha256=client_api.sha(__file__), service_client_sha256=client_api.sha(client_api.__file__))
             write_new(out/'request.json', request)
-            rank_commands(identity, dict(op='arm', mode='observe' if args.trace else 'units',
+            rank_commands(identity, dict(op='arm', mode='matrix_replay' if replay else 'observe' if args.trace else 'units',
                 out=str(out), request_id=request['request_id'], prompt_hash=request['prompt_hash']))
             result['reply'] = await client.run(request)
             result['coverage'] = coverage(out, identity)
+            if replay:
+                from .eager_matrix_replay import validate_rows
+                result['matrix_replay'] = []
+                for rank in (0, 1):
+                    report = read(out/f'rank-{rank}-matrix-replay.json')
+                    if (report['rank'] != rank or report['uuid'] != GPU_UUIDS[rank] or
+                            report['identity_sha256'] != digest(identity['ranks'][rank])):
+                        raise ValueError('Matrix replay identity mismatch')
+                    validate_rows(report['rows'])
+                    result['matrix_replay'].append(report)
+                result.update(scope='real_tensor_repeated_MLP_timing_not_calibrated_equations',
+                              equation_1_parameters_validated=False, equation_2_parameters_validated=False,
+                              request_latency_is_instrumented=True)
             result['cache_isolation'].update(miss_verified=True,
                 evidence='both_rank_context_key_requires_admitted_zero_and_full_512_prefill')
             result['status'] = 'complete'
@@ -536,7 +552,11 @@ def parser():
     for name in ('observe', 'pilot', 'clock-check', 'switch-check', 'collect', 'serial', 'compare'):
         cmd = sub.add_parser(name); cmd.add_argument('--identity', required=True); cmd.add_argument('--out', required=True)
         if name != 'observe': cmd.add_argument('--telemetry', required=True)
-        if name == 'observe': cmd.add_argument('--trace', action='store_true')
+        if name == 'observe':
+            mode = cmd.add_mutually_exclusive_group()
+            mode.add_argument('--trace', action='store_true')
+            mode.add_argument('--matrix-replay', action='store_true',
+                              help='Requires newly loaded workers; repeats real MLP tensors without copying weights')
         if name in ('observe', 'collect', 'serial', 'compare'): cmd.add_argument('--seed', type=int, required=True)
         if name == 'pilot': cmd.add_argument('--requests', type=int, default=20)
         if name in ('clock-check', 'switch-check', 'collect', 'serial', 'compare'): cmd.add_argument('--apply', action='store_true')
