@@ -3,7 +3,7 @@ import sys
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
-from rtx5090.eager_matrix_replay import case_spec, validate_rows, MatrixReplay
+from rtx5090.eager_matrix_replay import case_spec, validate_rows, MatrixReplay, compare_sequences, batch_scaling
 from rtx5090.eager import parser
 
 
@@ -13,6 +13,41 @@ def meta(shape):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_kernel_order_multiplicity_and_geometry(self):
+        def trace(names):
+            return dict(traceEvents=[dict(cat='kernel',ph='X',name=n,ts=i,
+                args=dict(device=0,stream=7,grid=[1,1,1],block=[32,1,1])) for i,n in enumerate(names)])
+        source=trace(['gemm','reduce'])
+        self.assertTrue(compare_sequences(source,source)['launch_geometry_match'])
+        self.assertFalse(compare_sequences(source,trace(['reduce','gemm']))['names_counts_order_match'])
+        self.assertFalse(compare_sequences(source,trace(['gemm','reduce','reduce']))['names_counts_order_match'])
+        other=trace(['gemm','reduce']); other['traceEvents'][0]['args']['grid']=[2,1,1]
+        self.assertTrue(compare_sequences(source,other)['names_counts_order_match'])
+        self.assertFalse(compare_sequences(source,other)['launch_geometry_match'])
+        other['traceEvents'][0]['args']['stream']=8
+        with self.assertRaises(ValueError): compare_sequences(source,other)
+        with self.assertRaises(ValueError): compare_sequences(source,trace([]))
+
+    def test_count_holdout_does_not_change_fit(self):
+        batches=[dict(repeats=n,elapsed_s=2+3*n) for _ in range(3) for n in (1,8,32,128)]
+        value=batch_scaling(batches)
+        self.assertAlmostEqual(value['slope_s_per_call'],3)
+        self.assertAlmostEqual(value['batch_intercept_s'],2)
+        for b in batches:
+            if b['repeats']==8: b['elapsed_s']=52
+        changed=batch_scaling(batches)
+        self.assertAlmostEqual(changed['slope_s_per_call'],3)
+        self.assertAlmostEqual(changed['holdout_relative_error'],-.5)
+        self.assertFalse(changed['physical_overhead_identified'])
+
+    def test_calibration_batch_contract(self):
+        rows=[dict(phase=p,module=m,collection_protocol='kernel_verified_batch_counts_v1',
+             batches=[dict(repeats=n,elapsed_s=.1) for _ in range(3) for n in (1,8,32,128)])
+             for p in ('prefill','decode') for m in ('gate_up_proj','down_proj')]
+        validate_rows(rows)
+        rows[0]['batches'].pop()
+        with self.assertRaises(ValueError): validate_rows(rows)
+
     def test_shapes(self):
         for phase, m in [('prefill', 512), ('decode', 1)]:
             for module, n, k in [('gate_up_proj', 17408, 5120), ('down_proj', 5120, 8704)]:

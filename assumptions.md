@@ -2,6 +2,8 @@
 
 ## 2026-11-06：Eq.(1)/(2) 离线计算入口
 
+- worker v2的matrix-calibrate对真实linear与同张量回放分别做短kernel trace，关闭profiler后测不同批次数。kernel序列和geometry可核对，但缓存等价仍未建立；batch截距/斜率只是摊销诊断，不作为Eq1容量或系统开销真值。完整独立参数标定尚未完成。
+
 - `independent_capacity`是外部合成primitive独立标定的条件性估计器：tiny-copy开销代理、BF16方阵计算、逻辑copy带宽，先冻结后比较留出primitive和已有MLP。它不匹配Qwen实际kernel/缓存/批内频率，不完成严格同路径或Eq2标定，不能用于正式选频。显存门槛与未完成项见 `INDEPENDENT_CAPACITY_zh.md`。
 
 - 后续新增 `observe --matrix-replay` 真实X/W复用计时：每rank每相位/投影首个单元、3批×32次，属于实施选择；重复访问的缓存状态与原请求不等价，不作为容量拟合/独立验证/实测算子能量。详见 `MATRIX_REPLAY_zh.md`。

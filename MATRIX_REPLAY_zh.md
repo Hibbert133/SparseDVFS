@@ -1,5 +1,32 @@
 # 常驻worker内真实MLP张量回放计时
 
+## worker v2：kernel核对与批次数采集
+
+新增 `observe --matrix-calibrate`，需要worker的matrix_replay_version>=2。
+当前v1进程已经缓存旧MatrixReplay类，git更新不能热替换；需按本文check-only→用户正常停止→新目录启动流程加载。
+无需外部CUDA进程或复制权重，但短profiler会额外占用主机/GPU资源，目标机尚需验证。
+
+- 分别对首个真实linear调用和同X/W回放抓取短CPU/CUDA trace，调用前后全设备同步以隔离待执行工作。
+- 保存 `rank-R-PHASE-MODULE-original.json` 与 `...-replay.json`，只提取真实kernel活动。
+- 拒绝缺失kernel、未知或多GPU/多stream活动；比较名称、数量、时间顺序及可用的grid/block。
+- 这是受同步/profiler干预的原始调用，不声称自然请求的缓存、重叠行为已完全复现。
+- 关闭profiler后，交错测量1/8/32/128次调用，每档3批。参数拟合只用1/32/128档，8档作为批次数留出。
+- 拟合 `batch_time = intercept + repeats*slope` 是计时摊销诊断。intercept不是Eq1的系统开销真值，slope不是独立容量参数。
+- kernel_mapping_passed只代表名称/数量/顺序一致；kernel_launch_geometry_passed单列；任何一个false都不应宣称完整路径核实。
+- Eq1独立P/B和Eq2功耗参数仍未完成，calibration_ready=false保留；此入口先补同路径采集的必要证据，不伪造拟合。
+- 57项相关CPU测试通过；尚未在目标机验证CUDA profiler、峰值显存、vLLM双rank行为。
+
+新服务inspect后，用以下命令代替本文旧的matrix-replay命令：
+
+```bash
+"$PY" -B -m rtx5090.eager observe --matrix-calibrate \
+  --identity "$CHECK/identity.json" --seed 11062301 \
+  --out "$RUN/matrix-calibrate-$(date +%s%N)"
+```
+
+主输出仅显示matrix_summary；完整张量元数据和各批时间保存在observation.json及各rank-matrix-replay.json。
+失败保留trace与rank失败证据，不自动重启、降级profiler或删批重试。
+
 2026-11-06；仅5090_eager。入口是 `rtx5090.eager observe --matrix-replay`。
 新增worker方法必须重新加载服务；旧进程不会因git更新热替换。
 客户端在预热/请求前检查两rank的matrix_replay_version，旧worker拒绝执行。

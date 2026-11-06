@@ -223,8 +223,10 @@ def coverage(directory, identity):
 
 async def observe(args):
     identity = checked(args.identity)
-    replay = getattr(args, 'matrix_replay', False)
-    if replay and any(r.get('matrix_replay_version') != 1 for r in identity['ranks']):
+    calibrate = getattr(args, 'matrix_calibrate', False)
+    replay = getattr(args, 'matrix_replay', False) or calibrate
+    version = 2 if calibrate else 1
+    if replay and any(r.get('matrix_replay_version', 0) < version for r in identity['ranks']):
         raise ValueError('Running workers lack matrix replay. Prepare/check new launcher before a user-operated restart.')
     out = service.fresh(args.out)
     result = dict(schema=core.SCHEMA, status='failed', identity_fingerprint=identity['fingerprint'])
@@ -236,7 +238,7 @@ async def observe(args):
             result['client_provenance'] = dict(commit=git('rev-parse', 'HEAD'),
                 eager_sha256=client_api.sha(__file__), service_client_sha256=client_api.sha(client_api.__file__))
             write_new(out/'request.json', request)
-            rank_commands(identity, dict(op='arm', mode='matrix_replay' if replay else 'observe' if args.trace else 'units',
+            rank_commands(identity, dict(op='arm', mode='matrix_calibrate' if calibrate else 'matrix_replay' if replay else 'observe' if args.trace else 'units',
                 out=str(out), request_id=request['request_id'], prompt_hash=request['prompt_hash']))
             result['reply'] = await client.run(request)
             result['coverage'] = coverage(out, identity)
@@ -253,6 +255,20 @@ async def observe(args):
                 result.update(scope='real_tensor_repeated_MLP_timing_not_calibrated_equations',
                               equation_1_parameters_validated=False, equation_2_parameters_validated=False,
                               request_latency_is_instrumented=True)
+                result['matrix_summary'] = [dict(rank=report['rank'], phase=row['phase'],
+                    module_source=row['parent'], pytorch_operator='aten.linear.default',
+                    kernel_names_verified=row['kernel_names_verified'],
+                    kernel_sequence=row.get('kernel_comparison', {}).get('source_sequence'),
+                    batch_scaling=row.get('batch_scaling'),
+                    evidence_file=str(out/f"rank-{report['rank']}-matrix-replay.json"))
+                    for report in result['matrix_replay'] for row in report['rows']]
+                if calibrate:
+                    result['kernel_mapping_passed'] = all(
+                        row.get('kernel_comparison', {}).get('names_counts_order_match') is True
+                        for report in result['matrix_replay'] for row in report['rows'])
+                    result['kernel_launch_geometry_passed'] = all(
+                        row.get('kernel_comparison', {}).get('launch_geometry_match') is True
+                        for report in result['matrix_replay'] for row in report['rows'])
             result['cache_isolation'].update(miss_verified=True,
                 evidence='both_rank_context_key_requires_admitted_zero_and_full_512_prefill')
             result['status'] = 'complete'
@@ -557,6 +573,8 @@ def parser():
             mode.add_argument('--trace', action='store_true')
             mode.add_argument('--matrix-replay', action='store_true',
                               help='Requires newly loaded workers; repeats real MLP tensors without copying weights')
+            mode.add_argument('--matrix-calibrate', action='store_true',
+                              help='Worker v2: verify isolated original/replay kernels then measure batch-count scaling')
         if name in ('observe', 'collect', 'serial', 'compare'): cmd.add_argument('--seed', type=int, required=True)
         if name == 'pilot': cmd.add_argument('--requests', type=int, default=20)
         if name in ('clock-check', 'switch-check', 'collect', 'serial', 'compare'): cmd.add_argument('--apply', action='store_true')
@@ -623,7 +641,7 @@ def main(argv=None):
         else: value = read(args.file)
         service.emit({k: v for k, v in value.items() if k not in (
             'ranks', 'windows', 'weights', 'transitions', 'tools', 'operators', 'workloads', 'contexts',
-            'train_prompt_hashes', 'training_prompts')})
+            'train_prompt_hashes', 'training_prompts', 'matrix_replay')})
         return 1 if value.get('status') in ('failed', 'not_ready') or value.get('passed') is False else 0
     except BaseException as exc:
         service.emit(dict(status='failed', error=safe_error(exc),

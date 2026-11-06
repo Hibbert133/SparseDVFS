@@ -70,7 +70,7 @@ class EagerWorker(ObservationWorker):
             runtime=str(self._eg_runtime), capabilities=core.CAPABILITIES,
             boundary_completion='device_synchronize_all_streams_serial_diagnostic',
             resolved_weight_loader='auto_actual_loader_class_not_observed')
-        value['matrix_replay_version'] = 1
+        value['matrix_replay_version'] = 2
         # The two-rank check is performed by the client after BOTH files exist.
         if not value['compilation_disabled'] or not value['graphs_disabled']:
             raise RuntimeError('Eager did not disable compile/graphs in actual worker config')
@@ -88,7 +88,7 @@ class EagerWorker(ObservationWorker):
                 raise RuntimeError('Configure only between complete requests')
             if command['op'] != 'arm': raise ValueError('Unknown eager RPC operation')
             mode = command['mode']
-            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay'): raise ValueError('Unsupported mode')
+            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate'): raise ValueError('Unsupported mode')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':
                 core.validate_plan(command['plan'], command['fingerprint'])
@@ -113,10 +113,11 @@ class EagerWorker(ObservationWorker):
             self._eg_tracker = PhaseTracker()
             self._eg_rows, self._eg_events, self._eg_steps = [], [], []
             self._eg_seq = 0
-            if self._eg_mode == 'matrix_replay':
+            if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                 from .eager_matrix_replay import MatrixReplay
                 self._eg_replay = MatrixReplay(self.model_runner.get_model(), int(self.rank),
-                                               lambda: self._eg_context)
+                    lambda: self._eg_context,
+                    kernel_out=command['out'] if self._eg_mode == 'matrix_calibrate' else None)
             if self._eg_mode == 'observe':
                 self.observation_start(dict(prompt_tokens=512, split='development',
                     directory=command['out'], request_key=command['request_id'], max_operators=250000))
@@ -176,7 +177,7 @@ class EagerWorker(ObservationWorker):
                     raise RuntimeError('An unrelated request arrived while experiment was armed')
             self._eg_key = core.context_key(context)
             self._eg_order, self._eg_open = [], None
-            if self._eg_mode == 'matrix_replay':
+            if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                 with self._eg_replay.scope():
                     result = super().execute_model(scheduler_output)
             else:
@@ -204,7 +205,7 @@ class EagerWorker(ObservationWorker):
                     self._eg_rows.append(dict(row, stream_event_ms=start.elapsed_time(end)))
                 self._eg_events.clear()
                 if self._eg_mode == 'observe': self.observation_stop()
-                if self._eg_mode == 'matrix_replay':
+                if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                     from .eager_matrix_replay import validate_rows
                     validate_rows(self._eg_replay.rows)
                     write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-matrix-replay.json',
