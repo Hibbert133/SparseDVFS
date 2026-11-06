@@ -1,0 +1,29 @@
+paper: https://arxiv.org/html/2603.21908v1
+audit_date: '2026-11-06'
+equation_1:
+  section: '4.1.1'
+  expression: 'max(W*(1-Sc)/P, D*(1-Sm)/B) + overhead'
+  implementation: sparsedvfs/paper_core.py:timeline_seconds
+  units: [FLOP, byte, FLOP/s, byte/s, s]
+equation_2:
+  section: '4.1.2'
+  expression: 'alpha*V^2*f + (k1*T+k2)*V'
+  implementation: sparsedvfs/paper_core.py:thermal_power_w
+  frequency_unit: Hz
+  temperature_unit: Celsius
+implementation_choices:
+  - GPU-only conditional projection; not CPU/GPU/EMC reproduction
+  - Independent evaluation of each equation with missing parameter report
+  - Dense effective sparsity fixed at zero without skipping evidence
+  - No implicit conversion of logical tensor bytes to measured traffic
+unresolved:
+  - Same-path compute capacity and bandwidth and overhead
+  - Cache and internal workspace traffic
+  - Voltage evidence and identifiable thermal coefficients
+  - Independent operator validation on both ranks
+verification:
+  cpu_tests_passed: 69
+  cli_smoke: [demo, prepare, predict]
+  target_gpu_executed: false
+  parameters_validated: false
+  hardware_validated: false

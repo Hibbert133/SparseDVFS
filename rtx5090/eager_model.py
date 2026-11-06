@@ -116,17 +116,28 @@ def fit(data, allow_synthetic=False):
     return model
 
 
-def predict(model, rank, context, unit, mhz, temperature):
+def predict_latency(model, rank, context, unit, mhz):
+    """Eq.(1) independently of voltage/thermal evidence (no deployment grant)."""
     key = f'{rank}:{context}/{unit}'
     spec, op, cap = model['workloads'][key], model['operators'][key], model['capacities'][str(rank)]
+    return timeline_seconds(spec['work_flop'], spec['data_byte'], 0, 0,
+        cap['peak_flops'][str(mhz)], cap['bandwidth_Bps'], op['overhead_s'])
+
+
+def predict_power(model, rank, context, unit, mhz, temperature):
+    """Eq.(2) independently of the timeline parameters."""
+    key = f'{rank}:{context}/{unit}'
+    op = model['operators'][key]
     thermal = model['thermal'][str(rank)]
     lo, hi = thermal['temperature_range_c']
     if not lo <= temperature <= hi: raise ValueError('Temperature outside calibrated range')
-    seconds = timeline_seconds(spec['work_flop'], spec['data_byte'], 0, 0,
-        cap['peak_flops'][str(mhz)], cap['bandwidth_Bps'], op['overhead_s'])
-    power = thermal_power_w(op['alpha'], op['voltage_by_mhz'][str(mhz)], mhz*1e6,
+    return thermal_power_w(op['alpha'], op['voltage_by_mhz'][str(mhz)], mhz*1e6,
                            thermal['k1'], thermal['k2'], temperature)
-    return seconds, power
+
+
+def predict(model, rank, context, unit, mhz, temperature):
+    return (predict_latency(model, rank, context, unit, mhz),
+            predict_power(model, rank, context, unit, mhz, temperature))
 
 
 def validate(data, model, allow_synthetic=False):
