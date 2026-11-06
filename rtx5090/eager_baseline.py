@@ -14,6 +14,7 @@ from . import eager, service_model as service, service_client as client_api
 from . import service_telemetry as telemetry
 from .service_core import read, write_new
 from .observe_core import digest
+from .telemetry_process import ProcessSampler
 
 
 def window_plan(seed, count):
@@ -62,7 +63,8 @@ async def collect(args, identity, out, result):
                 # The measured_window metrics gate, NOT the salt, certifies cache misses.
                 write_new(out/(name+'-isolation.json'), isolation)
                 row = await service.measured_window(client, identity, devices, requests,
-                    out, name, sources=sources, interval_s=.1, target=None, memory_reference=memory)
+                    out, name, sources=sources, interval_s=.1, target=None, memory_reference=memory,
+                    sampler_factory=lambda _devices, interval: ProcessSampler(config, interval))
                 summary = compact(row, name)
                 result['windows'].append(summary)
                 write_new(out/(name+'-summary.json'), summary)
@@ -101,6 +103,7 @@ def run(args):
             client_sha256=client_api.sha(__file__), identity_sha256=client_api.sha(args.identity),
             clock_writes=False, clock_policy='current_policy_not_verified_AUTO',
             instrumentation='worker_off_no_profiler_no_detailed_observation',
+            telemetry_execution='independent_spawned_process_same_WSL_monotonic_domain',
             energy_scope='two_GPU_boards_not_whole_machine',
             equation_1_validated=False, equation_2_validated=False, dvfs_validated=False,
             comparison_or_model_validation=False, windows=[])

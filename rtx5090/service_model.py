@@ -108,8 +108,9 @@ def new_compilation(cursor):
 
 
 async def measured_window(client, identity, devices, requests, out, name,
-                          sources=None, interval_s=.1, target=None, memory_reference=None):
-    sampler = telemetry.Sampler(devices, interval_s)
+                          sources=None, interval_s=.1, target=None, memory_reference=None,
+                          sampler_factory=None):
+    sampler = (sampler_factory or telemetry.Sampler)(devices, interval_s)
     result = dict(status='invalid', quality_errors=[], requests=len(requests),
                   request_ids=[r['request_id'] for r in requests],
                   prompt_hashes=[r['prompt_hash'] for r in requests],
@@ -130,7 +131,8 @@ async def measured_window(client, identity, devices, requests, out, name,
         if sampler.thread is not None:
             await asyncio.to_thread(sampler.finish)
         core.write_new(out/(name+'-telemetry.json'), dict(frames=sampler.frames,
-            errors=sampler.errors, begin_ns=begin, end_ns=end, clock_domain='client_WSL_monotonic_ns'))
+            errors=sampler.errors, begin_ns=begin, end_ns=end, clock_domain='client_WSL_monotonic_ns',
+            sampler_process_pid=getattr(sampler, 'child_pid', None)))
         if 'error' in result: core.write_new(out/(name+'-window.json'), result)
     try:
         after = await asyncio.to_thread(metrics, identity)
