@@ -147,6 +147,19 @@ python -B -m rtx5090.eager validate --data "$EAGER_RUN/validation/dataset.json" 
 
 ## 5. 论文建模与分块门槛
 
+### 2026-11-06 单卡矩阵kernel名称诊断
+
+`python -B -m rtx5090.matrix_probe --identity <eager身份文件> --trace-dir <完整trace目录> --rank 0 --out <新目录>`
+读取该rank最近生成的 `matrix-signatures` 文件，验证摘要哈希与四个已观察的MLP线性算子契约。
+服务保持运行，但执行期间不要发其他推理/实验请求。工具持有实验客户端锁，并在前后核实常驻服务身份。
+按UUID选择单卡；创建CUDA上下文前需1536 MiB空闲，之后需1024 MiB，未满足则停止。
+该余量是本诊断的保守实现选择，不是论文参数或显存峰值保证。GPU1此前仅221 MiB可用，不能直接运行。
+每个算子只预热一次、捕获一次，分开保存小型trace与kernel名称集合比较；不写频，不报告容量或能量参数。
+`kernel_names_matched_only`只表示四项kernel名称集合一致，不验证顺序/次数、实际输入数值、缓存状态或完整TP路径。
+合成BF16张量只用于派发诊断；`same_path_verified`、`calibration_ready`固定为false。
+rank0通过不能替代rank1。WDDM进程显存返回N/A时不擅自终止其他用户进程。
+开发侧40项相关CPU检查通过，目标GPU诊断尚待运行。
+
 统一入口已经包含：
 
 - `switch-check --identity ... --telemetry ... --gate ... --apply --out ...`：每方向5次切换，保留API返回、确认时间、原始样本及恢复。输出保守上界；默认不解锁look-ahead。
