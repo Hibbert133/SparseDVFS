@@ -54,14 +54,84 @@ def fit(observation):
     return model,report
 
 
+def validate(model, training, observation):
+    """Score every prescribed new-request batch without changing predictions."""
+    if digest(training) != model.get('source_sha256') or digest(fit(training)[0]) != digest(model):
+        raise ValueError('Frozen model does not match training evidence')
+    if observation.get('identity_fingerprint') != model['identity_fingerprint']:
+        raise ValueError('Worker identity changed')
+    for field in ('prompt_hash', 'request_id'):
+        value = observation.get('reply', {}).get(field)
+        if not value or value == training.get('reply', {}).get(field):
+            raise ValueError('Require a new request and prompt: '+field)
+    for evidence in (training, observation):
+        if evidence.get('status') != 'complete' or not evidence.get('kernel_mapping_passed') or not evidence.get('kernel_launch_geometry_passed'):
+            raise ValueError('Require completed kernel/geometry-matched collection')
+        if not evidence.get('cache_isolation', {}).get('miss_verified'):
+            raise ValueError('Require verified cache miss')
+        usage = evidence.get('reply', {}).get('usage', {})
+        if usage.get('prompt_tokens') != 512 or usage.get('completion_tokens') != 64:
+            raise ValueError('Require actual 512/64 usage')
+    original = {('%s:%s/%s' % (rank['rank'], row['phase'], row['module'])): row
+                for rank in training['matrix_replay'] for row in rank['rows']}
+    rows, seen = [], set()
+    for rank in observation['matrix_replay']:
+        for row in rank['rows']:
+            key = '%s:%s/%s' % (rank['rank'], row['phase'], row['module'])
+            if key in seen or key not in model['operators']:
+                raise ValueError('Duplicate or unknown operator')
+            seen.add(key)
+            op, old = model['operators'][key], original[key]
+            if rank['uuid'] != op['uuid'] or row['parent'] != op['module']:
+                raise ValueError('Rank/UUID/module changed')
+            for field in ('M', 'N', 'K', 'input_metadata', 'output_metadata'):
+                if field not in row or row[field] != old[field]:
+                    raise ValueError('Tensor metadata changed: '+field)
+            if row.get('collection_protocol') != 'kernel_verified_batch_counts_v1' or not row.get('kernel_names_verified'):
+                raise ValueError('Unverified collection protocol')
+            if row['kernel_comparison']['source_sequence'] != op['kernel_sequence']:
+                raise ValueError('Kernel sequence/geometry changed')
+            values = []
+            for count in (32, 128):
+                batch = [b['mean_call_s'] for b in row['batches'] if b['repeats'] == count]
+                if len(batch) != 3:
+                    raise ValueError('Require all three batches at each count')
+                for v in batch: positive(v, 'validation mean')
+                values.extend(batch)
+            prediction = op['latency_s']
+            rows.append(dict(key=key, prediction_s=prediction, check_values_s=values,
+                             scores=errors(values, [prediction]*len(values))))
+    if seen != set(model['operators']):
+        raise ValueError('Missing dual-rank cases')
+    passed = all(r['scores']['wape'] <= .1 and r['scores']['p90_relative_error'] <= .2 for r in rows)
+    return dict(status='new_request_check_passed' if passed else 'new_request_check_failed',
+                model_sha256=digest(model), source_sha256=digest(observation), rows=rows,
+                all_cases_within_project_error_limits=passed, parameters_updated=False,
+                validation_counts=[32, 128], batches_per_count=3,
+                scope=model['scope'], frequency_scaling_supported=False,
+                energy_prediction_supported=False, equation_1_parameters_validated=False,
+                equation_2_parameters_validated=False,
+                note='Fresh prompt, same resident workers and weights; not cross-frequency or end-to-end validation.')
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--replay',required=True); p.add_argument('--out',required=True)
+    p.add_argument('--model'); p.add_argument('--training-replay')
     args=p.parse_args()
-    model,report=fit(read(Path(args.replay)/'observation.json'))
+    if bool(args.model) != bool(args.training_replay):
+        p.error('--model and --training-replay must be supplied together')
+    observation=read(Path(args.replay)/'observation.json')
+    if args.model:
+        model=read(Path(args.model))
+        report=validate(model,read(Path(args.training_replay)/'observation.json'),observation)
+    else:
+        model,report=fit(observation)
     out=Path(args.out); out.mkdir(parents=True,exist_ok=False)
-    write_new(out/'model.json',model); write_new(out/'check.json',report)
-    lines=['Fixed-shape continuous-linear latency model; retrospective check only.',
+    if not args.model: write_new(out/'model.json',model)
+    write_new(out/('validation.json' if args.model else 'check.json'),report)
+    lines=[report['status'],
+           'Fixed-shape continuous-linear latency; no frequency or energy generalization.',
            'rank:phase/module | prediction us | check WAPE % | check P90 %']
     for r in report['rows']:
         lines.append('%s | %.3f | %.2f | %.2f'%(r['key'],r['prediction_s']*1e6,
@@ -69,6 +139,8 @@ def main():
     lines.append('Per-case numeric limits met: '+str(report['all_cases_within_project_error_limits']))
     (out/'REPORT.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     print('\n'.join(lines)); print('Saved:',out)
+    if args.model and not report['all_cases_within_project_error_limits']:
+        raise SystemExit(2)
 
 
 if __name__=='__main__': main()
