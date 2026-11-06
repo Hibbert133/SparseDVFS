@@ -50,8 +50,8 @@ def audit_matrix(x, y, relative_budget):
     """Training only. Column normalization removes unit-dependent conditioning."""
     x,y = np.asarray(x,dtype=float),np.asarray(y,dtype=float)
     budget = np.asarray(relative_budget,dtype=float)
-    if x.shape != (3,3) or y.shape != (3,) or budget.shape != (3,):
-        raise ValueError('Require exactly three training windows and three basis terms')
+    if x.ndim != 2 or x.shape[1] != 3 or not 3 <= len(x) <= 5 or y.shape != (len(x),) or budget.shape != (len(x),):
+        raise ValueError('Require three to five training windows and three basis terms')
     if not all(np.isfinite(v).all() for v in (x,y,budget)) or (x<=0).any() or (y<=0).any() or (budget<0).any():
         raise ValueError('Nonfinite/nonpositive regression inputs')
     scale = np.linalg.norm(x,axis=0)
@@ -59,19 +59,19 @@ def audit_matrix(x, y, relative_budget):
     _,s,vh = np.linalg.svd(z,full_matrices=False)
     rank = int(np.linalg.matrix_rank(z))
     condition = float(s[0]/s[-1]) if rank == 3 else None
-    result = dict(n_independent_windows=3, n_parameters=3, residual_degrees_of_freedom=0,
+    result = dict(n_independent_windows=len(x), n_parameters=3, residual_degrees_of_freedom=len(x)-3,
                   column_norms=scale.tolist(), singular_values=s.tolist(), rank=rank,
                   normalized_condition_number=condition,
                   weakest_scaled_parameter_direction=vh[-1].tolist(),
-                  parameters=None, blockers=[], coefficient_uncertainty_test='all_8_energy_budget_corners_fixed_features')
+                  parameters=None, blockers=[], coefficient_uncertainty_test='all_energy_budget_corners_fixed_features')
     if rank != 3: result['blockers'].append('rank_deficient')
     if condition is not None and condition > 1000:
         result['blockers'].append('normalized_condition_exceeds_1000')
     if result['blockers']: return result
-    scaled = np.linalg.solve(z,y)
+    scaled = np.linalg.lstsq(z,y,rcond=None)[0]
     coefficients = scaled/scale
-    candidates = np.asarray([np.linalg.solve(z,y*(1+budget*np.array(signs)))/scale
-                             for signs in itertools.product((-1,1),repeat=3)])
+    candidates = np.asarray([np.linalg.lstsq(z,y*(1+budget*np.array(signs)),rcond=None)[0]/scale
+                             for signs in itertools.product((-1,1),repeat=len(x))])
     deviations = np.max(np.abs(candidates-coefficients),axis=0)
     relative = deviations/np.maximum(np.abs(coefficients),1e-30)
     result.update(candidate_parameters=dict(zip(('alpha','k1','k2'), coefficients.tolist())),
@@ -84,7 +84,7 @@ def audit_matrix(x, y, relative_budget):
     return result
 
 
-def run(source, out):
+def run(source, out, extra=None):
     out.mkdir(parents=True,exist_ok=False)
     reference = read(source/'reference.json')
     if reference['status'] != 'host_envelope_reference_complete': raise ValueError('Incomplete collection')
@@ -99,14 +99,14 @@ def run(source, out):
                   equation_2_parameters_validated=False, clock_writes=False, ranks=[],
                   unresolved=['core_voltage_vs_whole_board_power_domain', 'sensor_update_period_unknown',
                               'constant_activity_factor_over_mixed_workload_assumed',
-                              'only_three_training_windows_zero_residual_degrees_of_freedom'],
+                              'few_independent_windows'],
                   implementation_choices=dict(condition_limit=1000, coefficient_sensitivity_limit=.2,
                        fit='unconstrained_solve_then_physical_and_sensitivity_checks_no_regularization',
                        feature_units=['V^2*Hz','C*V','V'], pilot_excluded=True,
                        temperature='NVML_Celsius_not_independently_verified_junction_temperature',
                        feature_error_budget_known=False))
-    def load(name):
-        folder=source/name
+    def load(name, base=None):
+        folder=(base or source)/name
         window=read(folder/'window.json')
         summary=read(folder/'summary.json')
         if window['identity_fingerprint'] != reference['identity_fingerprint'] or summary['status'] != 'valid_host_envelope':
@@ -118,6 +118,15 @@ def run(source, out):
                        energy_budget=energy['by_uuid'][u]['relative_uncertainty'],
                        samples_sha256=digest(data)) for u in GPU_UUIDS}
     training = [load('reference-'+str(i)) for i in (1,2,3)]
+    if extra is not None:
+        manifest=read(extra/'collection.json')
+        if manifest['status'] != 'complete' or manifest['identity_fingerprint'] != reference['identity_fingerprint']:
+            raise ValueError('Supplemental collection incomplete or wrong service')
+        if not manifest['restoration']['verified'] or manifest['windows'] != ['requested-2527','requested-2250']:
+            raise ValueError('Require restored two-condition diagnostic')
+        training += [load(n,extra) for n in manifest['windows']]
+        result['extra_manifest_sha256']=digest(manifest)
+        result['unresolved'].append('holdouts_only_cover_original_current_policy_not_new_frequency_conditions')
     for rank,uuid in enumerate(GPU_UUIDS):
         rows=[w[uuid] for w in training]
         audit=audit_matrix([r['mean_basis'] for r in rows],
@@ -161,7 +170,8 @@ def run(source, out):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source',required=True); p.add_argument('--out',required=True)
-    a=p.parse_args(); run(Path(a.source),Path(a.out))
+    p.add_argument('--extra',help='Completed two-condition supplemental collection')
+    a=p.parse_args(); run(Path(a.source),Path(a.out),Path(a.extra) if a.extra else None)
 
 
 if __name__ == '__main__': main()

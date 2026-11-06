@@ -4,6 +4,12 @@ from rtx5090.eq2_identifiability import audit_matrix, features
 
 
 class Eq2AuditTests(unittest.TestCase):
+    def test_five_windows(self):
+        x=np.array([[1,1,3],[2,3,1],[3,1,1],[2,2,3],[3,3,2]],float)
+        a=audit_matrix(x,x @ np.array([2,3,4]),[.00001]*5)
+        self.assertEqual(a['residual_degrees_of_freedom'],2)
+        np.testing.assert_allclose(list(a['parameters'].values()),[2,3,4])
+
     def test_constant_voltage_frequency_not_identifiable(self):
         a=audit_matrix([[1e9,40,1],[1e9,45,1],[1e9,50,1]],[100,110,120],[.005]*3)
         self.assertIsNone(a['parameters'])
