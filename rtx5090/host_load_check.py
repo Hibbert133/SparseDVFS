@@ -16,7 +16,7 @@ def save(path, value):
         json.dump(value, f, ensure_ascii=False, indent=2)
 
 
-def summarize(frames, uuids):
+def summarize(frames, uuids, voltage=False):
     rows = []
     for uuid in uuids:
         samples = [s for frame in frames for s in frame if s['uuid'] == uuid]
@@ -29,6 +29,9 @@ def summarize(frames, uuids):
             raise ValueError('Require real NVML and high-resolution host clock')
         rows.append(dict(uuid=uuid, samples=len(samples), gaps_over_350ms=sum(g > 350 for g in gaps),
                          largest_gaps_ms=sorted(gaps, reverse=True)[:3]))
+        if voltage:
+            from .nvapi_voltage import summarize_voltage
+            rows[-1]['voltage'] = summarize_voltage(samples)
     return rows
 
 
@@ -42,18 +45,28 @@ def host(args):
     ready, stop = threading.Event(), threading.Event()
     thread = None
     window_start, window_end = None, None
+    voltage_reader = None
+    def frame(pool):
+        readings = list(pool.map(lambda d: d.telemetry(), devices))
+        frames.append(readings)  # Preserve partial/error evidence, including NVAPI failure.
+        if voltage_reader is not None:
+            for reading in readings:
+                reading['voltage'] = voltage_reader.read(reading['uuid'])
+                v = reading['voltage']
+                if v['status'] != 0 or not v['reported_core_voltage_v']:
+                    raise RuntimeError('NVAPI voltage failed for '+reading['uuid']+': '+str(v['status']))
     def sample():
         try:
             with ThreadPoolExecutor(max_workers=2) as pool:
                 deadline = time.perf_counter()+900
                 while True:
                     begin = time.perf_counter()
-                    frames.append(list(pool.map(lambda d: d.telemetry(), devices)))
+                    frame(pool)
                     ready.set()
                     if stop.is_set():
                         # Stop can arrive during an in-flight query. Take a new
                         # complete frame AFTER observing stop to bracket the end.
-                        frames.append(list(pool.map(lambda d: d.telemetry(), devices)))
+                        frame(pool)
                         break
                     if time.perf_counter() >= deadline:
                         raise TimeoutError('Host sampling watchdog expired')
@@ -62,6 +75,10 @@ def host(args):
             errors.append(type(exc).__name__+': '+str(exc)); ready.set()
     try:
         for uuid in GPU_UUIDS: devices.append(NVML(uuid))
+        if getattr(args, 'voltage', False):
+            from .nvapi_voltage import VoltageReader
+            voltage_reader = VoltageReader(GPU_UUIDS)
+            save(out/'voltage-bindings.json', voltage_reader.bindings)
         thread = threading.Thread(target=sample, daemon=True)
         thread.start()
         if not ready.wait(15) or errors:
@@ -85,7 +102,7 @@ def host(args):
                 host_window_scope='encloses_WSL_load_includes_ready_and_finish_coordination'))
         else:
             save(out/'windows-sampling-failure.json', dict(errors=errors))
-    rows = summarize(frames, GPU_UUIDS)
+    rows = summarize(frames, GPU_UUIDS, getattr(args, 'voltage', False))
     result = dict(status='host_sampling_complete' if not errors else 'failed',
                   errors=errors, by_uuid=rows, energy_window_aligned=False)
     save(out/'windows-summary.json', result)
@@ -117,8 +134,10 @@ async def workload(args, out, result):
                 save(out/'requests.json', requests)
                 if getattr(args, 'verify_metrics', False):
                     result['metrics_before'] = await asyncio.to_thread(service.metrics, identity)
+                voltage_flags = ['--voltage'] if getattr(args, 'voltage', False) else []
                 host_process = await asyncio.create_subprocess_exec(args.windows_python, '-B', '-m',
                     'rtx5090.host_load_check', '--host', '--out', winpath(out),
+                    *voltage_flags,
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr, env=env)
                 ready = json.loads(await asyncio.wait_for(host_process.stdout.readline(), 30))
                 if ready.get('status') != 'host_ready': raise RuntimeError('Windows sampler not ready')
@@ -159,6 +178,7 @@ async def workload(args, out, result):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', action='store_true')
+    p.add_argument('--voltage', action='store_true', help='Require Windows-local read-only NVAPI voltage')
     p.add_argument('--identity')
     p.add_argument('--out', required=True)
     p.add_argument('--windows-python', default='/mnt/c/ProgramData/Anaconda3/python.exe')
@@ -176,7 +196,9 @@ def main():
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         out = service.fresh(args.out)
         result = dict(status='failed', clock_writes=False, energy_window_aligned=False,
-                      energy_validated=False, commit=eager.git('rev-parse', 'HEAD'), replies=[])
+                      energy_validated=False, voltage_requested=args.voltage,
+                      equation_2_parameters_validated=False,
+                      commit=eager.git('rev-parse', 'HEAD'), replies=[])
         try:
             asyncio.run(workload(args, out, result))
         except BaseException as exc:

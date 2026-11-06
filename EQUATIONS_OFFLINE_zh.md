@@ -1,5 +1,46 @@
 # 5090_eager：Eq.(1)/(2) 离线预测
 
+## 2026-11-06：Windows NVAPI带载电压采样
+
+目标机已报告只读接口0x465F9BCF成功：PCI 02为0.935 V，PCI 83为0.920 V。
+这仅证明单点查询成功，不代表电压曲线、传感器周期或Eq2参数已验证。
+
+`rtx5090.host_load_check --voltage`现在可在已有20请求负载期间采集电压。
+WSL客户端自动启动Windows Python采样器并等待ready；不用手动协调两个终端。
+Windows侧通过nvidia-smi的UUID/PCI清单绑定NVAPI bus ID，重复总线或缺卡拒绝。
+每条NVML样本附加voltage字段，包含原始微伏、换算伏值、返回码、绑定关系和独立QPC查询起止。
+NVML与NVAPI按顺序查询，并非原子同时测量。采样帧包含请求前后边界，不称作精确算子窗口。
+电压错误、零值、丢失或查询间隙超350ms均不通过；不放宽原NVML间隙门槛。
+电压保持常数也可能是有效读数，但不能据此推断传感器更新周期。
+
+在目标机WSL Bash（普通用户）执行：
+
+```bash
+(
+set -e
+cd /mnt/d/s00958243/SparseDVFS
+export PYTHONPATH="/mnt/d/s00958243/triton-360:${PYTHONPATH:-}"
+export SPARSEDVFS_TRITON_PATH=/mnt/d/s00958243/triton-360
+export TRITON_CACHE_DIR=/tmp/triton360-vllm-cache
+RUN="$PWD/runs/eager-1793872005954254496"
+OUT="$RUN/host-voltage-$(date +%s%N)"
+echo "本次输出：$OUT"
+/home/s00958243/miniforge3/envs/vllm-qwen/bin/python -B \
+  -m rtx5090.host_load_check --voltage \
+  --identity "$RUN/check-1793876461713035188/identity.json" --out "$OUT"
+)
+```
+
+预期`loaded_host_sampling_passed`，各UUID含voltage的range_v、distinct_values、max_query_ms、max_gap_ms。
+预计一个20请求窗口约95秒，另有预热；不重启服务、不写频、不安装依赖。
+产物为voltage-bindings.json、windows-samples.json、windows-summary.json、diagnostic.json。
+失败保留原始数据及windows-stderr.log；不重试、不把成功的部分拼成通过记录。
+本次新增及相关56项CPU检查通过；未在开发机宣称完成目标Windows带载采样。
+
+来源：LibreHardwareMonitor `LibreHardwareMonitorLib/Interop/NvApi.cs` 中
+NvGpuClientVoltRailsStatus（76字节、版本1、0x28/0x2c电压字段）及NvidiaGpu.cs读取路径。
+该私有NVAPI接口不具备公开稳定ABI保证；不调用任何电压或频率setter。
+
 2026-11-06 审计范围：论文 v1 §4.1.1–4.1.2，八组双rank MLP输入。
 原文：https://arxiv.org/html/2603.21908v1#S4.SS1
 
