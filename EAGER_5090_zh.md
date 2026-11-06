@@ -133,6 +133,14 @@ pilot通过后冻结累计能量/功率来源、显存频率参考和请求数�
 原始遥测记录sampler_process_pid；初始化或收尾失败停止，不回退线程、不自动重试。
 66项相关CPU测试通过（含实际spawn生命周期测试），修订后目标机采集待验证。
 
+修订后试采仍有间断，不能把HTTP解释器停顿认定为已证实根因。
+`python -B -m rtx5090.host_load_check --identity <现有eager身份> --out <新目录>`
+由WSL单入口调用已有Windows Python，先预热、准备请求，等待Windows本地NVML采样首帧就绪，
+再运行20个WSL 512/64请求，自动结束采样并保存两侧原始记录。无需手动切终端或重启服务。
+Windows模式兼容现有Python3.8；不通过bridge逐样本传输，不写频。
+`loaded_host_sampling_passed`仅说明该次负载期间本地间断检查通过，未完成跨系统能量窗口对齐，
+不得把采集全程累计能量称为20请求能量。3项CPU检查含就绪→20请求→结束时序及Python3.8语法检查通过。
+
 另：rank0 probe实机已匹配四个kernel名称集合，用户离线核对8192次相应算子的kernel次数全部一致。
 实际缓存、顺序和rank1仍未通过。该次CUDA可用显存报告30535 MiB，与NVML的2755 MiB冲突；
 后续probe在CUDA初始化后同时查询NVML，取两者较小值进行1024 MiB余量检查，不将CUDA读数当作物理显存已释放。
