@@ -11,8 +11,53 @@ from types import SimpleNamespace
 
 from . import eager, host_load_check as check, service_model as service
 from . import service_telemetry as telemetry
-from .service_core import read, write_new
-from .observe_core import GPU_UUIDS
+from .service_core import read, write_new, errors, positive
+from .observe_core import GPU_UUIDS, digest
+
+
+def power_targets(window):
+    positive(window['host_window_s'], 'host duration')
+    duration = window['host_window_s']
+    targets = {}
+    for uuid in GPU_UUIDS:
+        energy = window['energy_by_uuid_j'][uuid]
+        positive(energy, 'board energy')
+        targets[uuid+'/energy_j'] = energy
+        targets[uuid+'/mean_power_w'] = energy/duration
+    targets['pair/energy_j'] = sum(window['energy_by_uuid_j'][u] for u in GPU_UUIDS)
+    targets['pair/mean_power_w'] = targets['pair/energy_j']/duration
+    return targets
+
+
+def freeze_power(windows, identity):
+    if [w['name'] for w in windows] != ['reference-1', 'reference-2', 'reference-3']:
+        raise ValueError('Require exactly three prescribed training windows')
+    if any(w['status'] != 'valid_host_envelope' or w['requests'] != 20 for w in windows):
+        raise ValueError('Invalid training window')
+    values = [power_targets(w) for w in windows]
+    return dict(schema='fixed-workload-board-power-v1', identity_fingerprint=identity,
+                training_sha256=digest(windows),
+                predictions={k:statistics.mean(v[k] for v in values) for k in values[0]},
+                estimator='arithmetic_mean_of_three_training_windows',
+                scope='20_requests_512_64_same_resident_service_host_envelope',
+                voltage_used_as_predictor=False, equation_2_validated=False,
+                operator_prediction_supported=False, frequency_scaling_supported=False)
+
+
+def validate_power(model, windows):
+    if [w['name'] for w in windows] != ['holdout-1', 'holdout-2', 'holdout-3']:
+        raise ValueError('Require all three prescribed holdout windows')
+    if any(w['status'] != 'valid_host_envelope' or w['requests'] != 20 for w in windows):
+        raise ValueError('Invalid holdout window')
+    values = [power_targets(w) for w in windows]
+    rows = [dict(target=k, prediction=p, observed=[v[k] for v in values],
+                 scores=errors([v[k] for v in values], [p]*3))
+            for k,p in model['predictions'].items()]
+    passed = all(r['scores']['wape'] <= .1 and r['scores']['p90_relative_error'] <= .2 for r in rows)
+    return dict(status='empirical_window_prediction_passed' if passed else 'empirical_window_prediction_failed',
+                model_sha256=digest(model), validation_sha256=digest(windows),
+                passed=passed, rows=rows, parameters_updated=False, equation_2_validated=False,
+                note='Three new windows, same workload and service; no operator or cross-frequency claim')
 
 
 def local_energy(data, memory_reference=None):
@@ -77,14 +122,19 @@ def run(args):
             write_new(out/'protocol.json', dict(requests=20, input=512, output=64, concurrency=1,
                 seed=args.seed, windows=names, interval_s=.1, gap_limit_s=.35, uncertainty_limit=.03,
                 window='Windows_QPC_ready_marker_to_finish_marker',
-                includes_coordination=True, repeats_are_not_model_validation=True))
+                includes_coordination=True, voltage_requested=getattr(args, 'voltage', False),
+                prediction_requested=getattr(args, 'predict', False),
+                predictor='three_training_window_means_frozen_before_holdout',
+                prediction_limits=dict(wape=.1, p90_relative_error=.2),
+                equation_2_validation=False))
             for i, name in enumerate(names):
                 folder = out/name
                 folder.mkdir()
                 row = dict(status='failed', replies=[])
                 try:
                     current = SimpleNamespace(identity=args.identity, windows_python=args.windows_python,
-                                              seed=args.seed+20*i, verify_metrics=True)
+                                              seed=args.seed+20*i, verify_metrics=True,
+                                              voltage=getattr(args, 'voltage', False))
                     asyncio.run(check.workload(current, folder, row))
                     if row['status'] != 'loaded_host_sampling_passed' or row.get('cache_status') != 'verified_miss':
                         raise RuntimeError('Host sampling or request/cache gate failed')
@@ -109,15 +159,26 @@ def run(args):
                         energy_by_uuid_j={u:v['energy_j'] for u,v in energy['by_uuid'].items()},
                         energy_relative_uncertainty=energy['relative_uncertainty'],
                         clock_ranges=energy['clock_ranges'])
+                    summary['mean_board_power_w'] = energy['energy_j']/energy['host_window_s']
+                    summary['voltage_summary'] = row['by_uuid'] if getattr(args, 'voltage', False) else None
                     result['windows'].append(summary)
                     write_new(folder/'summary.json', summary)
                     service.emit(summary)
+                    if name == 'reference-3' and getattr(args, 'predict', False):
+                        frozen = freeze_power(result['windows'][1:], identity['fingerprint'])
+                        write_new(out/'power-model.json', frozen)
+                        service.emit(dict(status='power_model_frozen_before_holdout', predictions=frozen['predictions']))
                 except BaseException as exc:
                     row.update(status='failed', error=service.safe_error(exc))
                     raise
                 finally:
                     write_new(folder/'window.json', row)
             result['status'] = 'host_envelope_reference_complete'
+            if getattr(args, 'predict', False):
+                validation = validate_power(read(out/'power-model.json'), result['windows'][4:])
+                write_new(out/'power-validation.json', validation)
+                result['prediction_validation'] = validation
+                service.emit(validation)
         except BaseException as exc:
             result['error'] = service.safe_error(exc)
             raise
@@ -139,10 +200,14 @@ def main():
     p.add_argument('--identity', required=True)
     p.add_argument('--out', required=True)
     p.add_argument('--seed', type=int, default=1110000)
+    p.add_argument('--voltage', action='store_true', help='Require simultaneous Windows NVAPI voltage sampling')
+    p.add_argument('--predict', action='store_true', help='Freeze fixed-workload power/energy means before three holdout windows')
     p.add_argument('--windows-python', default='/mnt/c/ProgramData/Anaconda3/python.exe')
     try:
         result = run(p.parse_args())
         service.emit(dict(status=result['status'], windows=len(result['windows']), dvfs_validated=False))
+        if result.get('prediction_validation', {}).get('passed') is False:
+            raise SystemExit(2)
     except Exception as exc:
         service.emit(dict(status='failed', error=service.safe_error(exc)))
         raise SystemExit(1)

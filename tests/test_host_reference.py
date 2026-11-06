@@ -1,6 +1,6 @@
 import copy
 import unittest
-from rtx5090.host_reference import local_energy
+from rtx5090.host_reference import local_energy, freeze_power, validate_power
 from rtx5090.observe_core import GPU_UUIDS
 
 
@@ -21,6 +21,21 @@ def samples():
 
 
 class HostEnergyTests(unittest.TestCase):
+    def test_frozen_power_energy_predictions(self):
+        def windows(prefix, scale=1):
+            return [dict(name=prefix+'-'+str(i), status='valid_host_envelope', requests=20,
+                         host_window_s=100, energy_by_uuid_j={u:10000*scale for u in GPU_UUIDS})
+                    for i in (1,2,3)]
+        model = freeze_power(windows('reference'), 'id')
+        self.assertEqual(model['predictions']['pair/mean_power_w'], 200)
+        self.assertEqual(model['predictions']['pair/energy_j'], 20000)
+        before = copy.deepcopy(model)
+        self.assertTrue(validate_power(model, windows('holdout'))['passed'])
+        self.assertFalse(validate_power(model, windows('holdout', 2))['passed'])
+        self.assertEqual(model, before)
+        with self.assertRaises(ValueError): freeze_power(windows('holdout'), 'id')
+        with self.assertRaises(ValueError): validate_power(model, windows('holdout')[:2])
+
     def test_common_host_window_counter_difference(self):
         result = local_energy(samples())
         self.assertAlmostEqual(result['energy_j'], 19980)
