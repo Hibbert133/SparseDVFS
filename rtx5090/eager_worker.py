@@ -74,7 +74,7 @@ class EagerWorker(ObservationWorker):
             resolved_weight_loader='auto_actual_loader_class_not_observed')
         value['matrix_replay_version'] = 2
         value['operator_cost_version'] = 2
-        value['operator_boundary_version'] = 1
+        value['operator_boundary_version'] = 2
         value['operator_boundary_sha256'] = sha(Path(__file__).parent/'operator_boundary_worker.py')
         value['independent_primitives_version'] = 1
         value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
@@ -139,6 +139,7 @@ class EagerWorker(ObservationWorker):
                     directory=command['out'], request_key=command['request_id'], max_operators=250000))
 
     def _eg_begin(self, name):
+        if self._eg_poisoned: raise RuntimeError(self._eg_poisoned)
         context = self._eg_context
         if context is None: return
         index = len(self._eg_order)
@@ -213,6 +214,7 @@ class EagerWorker(ObservationWorker):
             self._eg_failure(exc); raise
 
     def sample_tokens(self, grammar_output):
+        if self._eg_poisoned: raise RuntimeError(self._eg_poisoned)
         if self._eg_context is None: return super().sample_tokens(grammar_output)
         try:
             if grammar_output is not None: raise RuntimeError('Structured generation is outside protocol')
@@ -274,6 +276,7 @@ class EagerWorker(ObservationWorker):
             self._eg_failure(exc); raise
 
     def _eg_failure(self, exc):
+        if getattr(self, '_eg_poisoned', None): return  # Preserve the first failure.
         if getattr(self, '_eg_boundary', None) is not None:
             self._eg_boundary.close(); self._eg_boundary = None
         if getattr(self, '_eg_operator_cost', None) is not None:

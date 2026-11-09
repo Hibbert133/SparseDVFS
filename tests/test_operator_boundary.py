@@ -43,13 +43,33 @@ class BoundaryTests(unittest.TestCase):
             def __str__(self):return 'aten.linear.default'
             def __call__(self):self.calls+=1;return None
         with tempfile.TemporaryDirectory() as root:
-            c=dict(context='decode.0',parent='model.layers.1.attn',source_ordinals=[0,0],
+            c=dict(context='decode.0',operator='aten.linear.default',parent='model.layers.1.attn',source_ordinals=[0,0],
                    contracts=[dict(overload='aten.linear.default',inputs={},outputs={})]*2)
             command=dict(out=root,boundaries=[c],coordinator='unused',fingerprint='fp')
             obs=module.BoundaryObserver(None,0,lambda:context,command,{'gpu_uuid':GPU_UUIDS[0]})
             with patch.object(module,'rpc',return_value=dict(released=True,seq=0,clock_writes=False)):
-                op=Op();obs.dispatch(op,(),{});obs.finish();self.assertEqual(op.calls,1)
+                op=Op();obs.ordinals['decode.0']=17
+                obs.dispatch(op,(),{});obs.finish();self.assertEqual(op.calls,1)
                 bad=module.BoundaryObserver(None,0,lambda:context,command,{'gpu_uuid':GPU_UUIDS[0]})
-                bad.parents=['wrong']
+                bad.candidates['decode.0']['contracts']=[dict(overload='aten.linear.default',inputs={'wrong':True},outputs={})]*2
                 with self.assertRaises(ValueError):bad.dispatch(op,(),{})
                 self.assertEqual(op.calls,1)
+
+class FailureRetentionTests(unittest.TestCase):
+    def test_first_failure_survives_sample_callback(self):
+        import json
+        from tests.test_eager_worker import WorkerTests
+        with tempfile.TemporaryDirectory() as root:
+            worker,_=WorkerTests().worker(root)
+            worker._eg_failure(ValueError('original contract error'))
+            worker._eg_failure(RuntimeError('secondary ordering error'))
+            with self.assertRaisesRegex(RuntimeError,'original contract error'):
+                worker.sample_tokens(None)
+            record=json.loads((Path(root)/'rank-0-failure.json').read_text())
+            self.assertIn('original contract error',record['error'])
+    def test_duplicate_semantic_candidate_rejected(self):
+        data=fixture()
+        for window in data['windows']:
+            for rank in (0,1):
+                window['operators'][f'{rank}:prefill/000000']['shape']['overload']='aten.linear.default'
+        with self.assertRaisesRegex(ValueError,'not unique'):boundaries(data)

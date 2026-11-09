@@ -187,3 +187,14 @@ call. Peer wait is 10s, RPC 12s, HTTP request timeout 120s. Timeout may poison t
 and require manual service recovery; no automatic restart or clock writes occur.
 Old collection supplies candidate contracts; the new run records fresh identity separately
 and rechecks actual operands. It does not transfer old model/hardware certificates.
+
+
+## Boundary v2 after target failure
+
+Both ranks reported actual input/parent contract mismatch before any rendezvous. The
+later sample callback produced an ordering error that overwrote the original failure.
+Exact differing operands were not captured, so ordinal drift is a failure hypothesis,
+not a proven exclusive root cause. V2 locates a source-validated unique parent/overload
+within each selected context and retains full input/output metadata checks; global
+dispatch ordinals are diagnostic only. Actual mismatches emit field differences.
+Duplicate semantic calls remain fatal, and the first worker failure is retained.

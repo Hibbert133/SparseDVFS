@@ -19,6 +19,13 @@ def boundaries(data):
     if report['mismatches'] or [c['context'] for c in report['candidates']]!=list(CONTEXTS):
         raise ValueError('Four matching candidate boundaries required')
     ops=data['windows'][0]['operators']
+    for c in report['candidates']:
+        for w in data['windows']:
+            for rank in (0,1):
+                matches=[key for key,row in w['operators'].items()
+                    if key.startswith(f"{rank}:{c['context']}/") and row['parent']==c['parent']
+                    and row['shape']['overload']==c['operator']]
+                if len(matches)!=1:raise ValueError('Semantic boundary is not unique in source windows')
     return [dict(c,contracts=[ops[k]['shape'] for k in c['before_keys']]) for c in report['candidates']]
 
 
@@ -27,8 +34,8 @@ async def run(a,identity,out):
     selected=boundaries(source)
     source_hash=digest(source); source_identity=source['identity_fingerprint']
     del source
-    if any(r.get('operator_boundary_version',0)<1 for r in identity['ranks']):
-        raise ValueError('Normal worker restart required: operator_boundary_version=1 absent')
+    if any(r.get('operator_boundary_version',0)<2 for r in identity['ranks']):
+        raise ValueError('Normal worker restart required: operator_boundary_version=2 absent')
     result=dict(status='failed',clock_writes=False,restoration_required=False,
                 identity_fingerprint=identity['fingerprint'],source_collection_sha256=source_hash,
                 source_identity_fingerprint=source_identity,

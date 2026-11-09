@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 import torch
 from .observe_worker import Observer
-from .observe_core import digest
+from .operator_parameter_gaps import differences
 from .eager_core import context_key
 from .eager_ipc import rpc
 from sparsedvfs_vllm.operators import tensor_metadata
@@ -31,17 +31,24 @@ class BoundaryObserver(Observer):
         key=context_key(context);candidate=self.candidates.get(key)
         if candidate is None:return func(*args,**kwargs)
         index=self.ordinals.get(key,0);self.ordinals[key]=index+1
-        if index!=candidate['source_ordinals'][self.rank]:return func(*args,**kwargs)
+        # Dispatcher ordinals may shift across instrumented captures. Locate the
+        # unique semantic call; retain ordinal solely as provenance.
+        if not self.parents or self.parents[-1]!=candidate['parent'] or str(func)!=candidate['operator']:
+            return func(*args,**kwargs)
         self.busy=True
         try:
+            if key in self.seen:raise ValueError('Repeated semantic boundary in one context')
             actual=dict(overload=str(func),inputs=tensor_metadata(dict(args=args,kwargs=kwargs),torch))
             expected=candidate['contracts'][self.rank]
             if (self.parents[-1]!=candidate['parent'] or
                 actual!=dict(overload=expected['overload'],inputs=expected['inputs'])):
+                self.log(event='contract_mismatch',context=key,actual_ordinal=index,
+                    source_ordinal=candidate['source_ordinals'][self.rank],
+                    differences=differences(dict(overload=expected['overload'],inputs=expected['inputs']),actual))
                 raise ValueError('Boundary actual input/parent contract mismatch')
             sequence=len(self.seen)
             if key!=self.command['boundaries'][sequence]['context']:raise ValueError('Boundary context order mismatch')
-            self.log(event='gpu_wait_begin',context=key,ordinal=index)
+            self.log(event='gpu_wait_begin',context=key,ordinal=index,source_ordinal=candidate['source_ordinals'][self.rank])
             expired=threading.Event()
             def timeout():
                 expired.set();self.log(event='gpu_wait_timeout',context=key)
