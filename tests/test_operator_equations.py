@@ -8,6 +8,7 @@ from rtx5090.operator_parameter_gaps import build,linear_work
 
 def fixture():
     b=dict(schema='operator-equations-v1',scope='synthetic_test_only',identity_fingerprint='fixture',
+        selection_policy='legacy_no_slowdown',
         current_identity_verified=True,rank_join_verified=True,rank_join_evidence_sha256='fixture',
         units_contract=dict(time='s',work='FLOP',data='byte',frequency='Hz',voltage='V',power='W'),
         operators=[],families={},thermal={},states={},switch_s=.001,switch_bound_verified=False,

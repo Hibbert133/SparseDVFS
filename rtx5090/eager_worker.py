@@ -77,6 +77,8 @@ class EagerWorker(ObservationWorker):
         value['operator_boundary_version'] = 2
         value['operator_boundary_sha256'] = sha(Path(__file__).parent/'operator_boundary_worker.py')
         value['independent_primitives_version'] = 1
+        value['resource_calibration_version'] = 1
+        value['resource_calibration_sha256'] = sha(Path(__file__).parent/'resource_worker.py')
         value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
             ('worker_primitives.py', 'stateless_calibration_adapter.py')}
         # The two-rank check is performed by the client after BOTH files exist.
@@ -96,7 +98,11 @@ class EagerWorker(ObservationWorker):
                 raise RuntimeError('Configure only between complete requests')
             if command['op'] != 'arm': raise ValueError('Unknown eager RPC operation')
             mode = command['mode']
-            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives', 'operator_boundary'): raise ValueError('Unsupported mode')
+            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives', 'operator_boundary', 'resource_calibration'): raise ValueError('Unsupported mode')
+            if mode == 'resource_calibration':
+                from .resource_worker import specification
+                specification(**command['resource_case'])
+                if command.get('apply') is not True: raise ValueError('Calibration requires explicit apply')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':
                 core.validate_plan(command['plan'], command['fingerprint'])
@@ -195,6 +201,9 @@ class EagerWorker(ObservationWorker):
             if self._eg_mode == 'independent_primitives' and context['step'] == 0:
                 from .worker_primitives import collect
                 collect(torch, int(self.rank), self._eg_identity, self._eg_config['out'])
+            if self._eg_mode == 'resource_calibration' and context['step'] == 0:
+                from .resource_worker import collect
+                collect(torch, int(self.rank), self._eg_identity, self._eg_config)
             self._eg_key = core.context_key(context)
             self._eg_order, self._eg_open = [], None
             if self._eg_mode == 'operator_boundary':

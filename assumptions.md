@@ -210,3 +210,19 @@ observed contexts. No cross-context or full-request graph is asserted. Boundary
 wait measurements are reported separately, never relabeled switching latency or
 a calibrated bound. Output stays non-deployable; hypothetical block boundaries
 are not certified by the four earlier selected boundary tests.
+
+## Resident resource modeling (2026-11-09)
+
+See RESOURCE_MODEL_zh.md for pinned methodological references and license checks.
+Independent code; no third-party kernels or foreign-device parameters copied.
+Default selection now requires explicit latency budgets and provenance. Legacy
+fastest-only selection is opt-in and unchanged for historical reproduction.
+Resource benchmarks use fresh bounded tensors inside existing worker contexts,
+not replay of stateful attention or collectives. Eq1 assumes inverse core-frequency
+compute scaling and constant logical-byte bandwidth within the sampled memory
+state. Unidentifiable active paths are refused. Eq2 jointly fits per-resource
+activity factors with shared thermal terms per board; no added intercept.
+Measured holdout V/f/T yields a CONDITIONAL power diagnostic, not a prospective
+prediction certificate. Sensor feature uncertainty, core-voltage/board scope,
+same-kernel and cache transfer, exact timing-frequency alignment and whole-Qwen
+coverage remain explicit blockers. Numeric validation never removes them.

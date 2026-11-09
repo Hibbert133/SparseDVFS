@@ -149,6 +149,7 @@ def build(inventories,linear=None):
                     capacities={str(f):dict(peak_flops=None,bandwidth_Bps=None,frequency_range_hz=None) for f in (2250,2527)})
                 bundle['families'][family_id]=family
                 op=node['operator']
+                from .resource_model import resource_class
                 policy=('paired_ranks_only' if 'all_reduce' in op or 'all_gather' in op else
                         'original_once_or_verified_written_state_restore' if 'attention' in op or 'cache' in op else
                         'classify_metadata_copy_or_kernel_first' if not node['kernels'] else
@@ -157,6 +158,8 @@ def build(inventories,linear=None):
                     representative=node['id'],representative_context=node['context'],
                     representative_parent=node['parent_label'],representative_layer=node['layer'],
                     work_class=work_class(node),replay_policy=policy,control_settings=[2250,2527],reuse_validated=False,
+                    resource_calibration_class=resource_class(op),
+                    resource_parameters_auto_transfer=False,
                     required=['path_state_kernel_evidence','independent_capacity_bandwidth_overhead',
                               'activity_alpha_at_effective_sparsity_zero','independent_holdout'],
                     static_work_definitions_missing=0)

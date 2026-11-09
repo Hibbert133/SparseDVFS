@@ -40,6 +40,14 @@ def audit(bundle):
     def need(test,reason,where):
         if not test:issues.append(dict(reason=reason,where=where))
     need(bundle.get('current_identity_verified') is True,'current_service_identity_unverified','bundle')
+    policy=bundle.get('selection_policy','latency_budget')
+    need(policy in ('latency_budget','legacy_no_slowdown'),'unknown_selection_policy','bundle')
+    if policy=='latency_budget':
+        for op in bundle['operators']:
+            value=bundle.get('operator_latency_budgets_s',{}).get(op['id'])
+            need(type(value) in (float,int) and math.isfinite(value) and value>0,
+                 'missing_explicit_operator_latency_budget',op['id'])
+        need(bool(bundle.get('budget_provenance')),'missing_budget_allocation_provenance','bundle')
     need(bool(bundle.get('identity_fingerprint')),'missing_identity','bundle')
     need(bundle.get('units_contract')==dict(time='s',work='FLOP',data='byte',frequency='Hz',voltage='V',power='W'),
          'physical_units_unverified','bundle')
@@ -124,7 +132,7 @@ def predict(bundle):
     result=dict(schema='operator-predictions-v1',source_sha256=digest(bundle),
         identity_fingerprint=bundle.get('identity_fingerprint'),deployable=False,clock_writes=False,
         status='blocked_parameter_evidence' if issues else 'equation_predictions_complete',
-        blockers=issues,operators={},selection_policy='no_predicted_slowdown_minimum_predicted_energy',
+        blockers=issues,operators={},selection_policy=bundle.get('selection_policy','latency_budget'),
         equation_implementation='Eq1_max_compute_memory_plus_overhead_and_Eq2',
         cpu_emc='unsupported_current_backend',pair_completion='max_of_rank_predictions_requires_join_evidence')
     if issues:return result
@@ -143,7 +151,10 @@ def predict(bundle):
             t=max(v['latency_s'] for v in ranks.values())
             # Both boards' power must be calibrated over the same paired-unit window.
             options[f]=dict(latency_s=t,energy_j=t*sum(v['power_w'] for v in ranks.values()),ranks=ranks)
-        result['operators'][unit['id']]=dict(selected_mhz=select_no_slowdown(options),
+        from .resource_model import select_budget
+        selected=(select_no_slowdown(options) if result['selection_policy']=='legacy_no_slowdown'
+                  else select_budget(options,bundle['operator_latency_budgets_s'][unit['id']]))
+        result['operators'][unit['id']]=dict(selected_mhz=selected,
                                              predictions={str(f):v for f,v in options.items()})
     return result
 
