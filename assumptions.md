@@ -124,3 +124,15 @@
 - 不使用板级混合负载功率乘Event包络作为严格算子能量，不把Event中位数当作Eq1容量模型。历史线性回放及功率候选只作为明确标记的参考证据。
 - N=5及频率相似阈值5%保持固定；前者为论文示例，后者为移植选择。合并后按新频率重新计算块时间，短尾块/等号单列Eq3审计。
 - 部分dispatcher序列不是完整DAG；没有依赖/资源证据时只做非部署诊断。当前stream事件采集作为后续参数核实工具保留，单独版本门槛，不自动重启旧worker。
+
+
+## 2026-11-09: TP embedding structural pairing
+
+Target installed vLLM `_custom_ops.vocab_parallel_embedding` source supplied by the user calls
+`torch.ops._C.vocab_parallel_embedding(out, input_ids, weight, org_start, org_end, padding, added_start, added_end)`.
+Thus dispatcher args[3]/args[4] are original vocabulary boundaries (the wrapper itself has no out argument).
+The offline inventory recognizes contiguous rank-ordered original shards starting at zero only when
+all other normalized fields match, tensor shapes/types and shard capacity pass checks, and added ranges are empty.
+This conservative adapter is a port choice, not a SparseDVFS paper rule. Nonempty added vocabulary remains unsupported.
+Original differences and signature hashes are retained. No token-content, collective, current-service identity,
+full vocabulary coverage, kernel equivalence, graph join or model parameter certification follows from this check.

@@ -33,6 +33,40 @@ def differences(a, b, path='$'):
     return [] if a==b else [dict(path=path, rank0=a, rank1=b)]
 
 
+def embedding_shard_pair(left, right, delta):
+    """Recognize only the reviewed out-first TP original-vocabulary ABI.
+
+    This is a structural contract, not evidence of token values or all-reduce.
+    """
+    op='_C.vocab_parallel_embedding.default'
+    if left.get('overload')!=op or right.get('overload')!=op: return None
+    allowed={'$.signature.inputs.args[3]', '$.signature.inputs.args[4]'}
+    if not delta or any(d['path'] not in allowed for d in delta): return None
+    rows=[]
+    for meta in (left,right):
+        inputs=meta.get('inputs',{});args=inputs.get('args',[])
+        if len(args)!=8 or inputs.get('kwargs'): return None
+        out,ids,weight=args[:3]
+        if not all(isinstance(t,dict) and t.get('tensor') is True for t in (out,ids,weight)): return None
+        shapes=[t.get('shape') for t in (out,ids,weight)]
+        if not all(isinstance(sh,list) and all(type(d) is int and d>0 for d in sh) for sh in shapes): return None
+        os,ins,ws=shapes
+        if len(os)!=2 or len(ins)!=1 or len(ws)!=2 or os!=[ins[0],ws[1]]: return None
+        if ids.get('dtype') not in ('torch.int32','torch.int64'): return None
+        if out.get('dtype')!=weight.get('dtype'): return None
+        if any(type(v) is not int or v<0 for v in args[3:]): return None
+        start,end,padding,added_start,added_end=args[3:]
+        if end<=start or added_start!=added_end: return None  # added vocab needs its own reviewed contract
+        if end-start+padding>ws[0]: return None
+        rows.append(dict(original_range=[start,end],padding_rows=padding,
+                         added_range=[added_start,added_end],weight_shape=ws))
+    if rows[0]['original_range'][0]!=0 or rows[0]['original_range'][1]!=rows[1]['original_range'][0]: return None
+    return dict(rule='vllm_out_first_original_vocab_tp2_v1',ranks=rows,
+                scope='structural_shard_arguments_only',collective_verified=False,
+                source='user_supplied_installed_vllm_custom_ops_wrapper',
+                signature_sha256=[digest(left),digest(right)])
+
+
 def elementwise_work(meta):
     op=meta.get('overload')
     if op not in ('aten.add.Tensor', 'aten.sub.Tensor', 'aten.mul.Tensor'): return None
@@ -155,7 +189,7 @@ def build(inventories,linear=None):
     by_context=[defaultdict(list),defaultdict(list)]
     for r,inv in enumerate(inventories):
         for node in inv['nodes']:by_context[r][node['context']].append(node)
-    mismatches=[]; mismatch_details=[]
+    mismatches=[]; mismatch_details=[]; accepted_shards=[]
     if set(by_context[0])!=set(by_context[1]):raise ValueError('Rank contexts differ')
     for context,left in by_context[0].items():
         right=by_context[1][context]
@@ -165,7 +199,11 @@ def build(inventories,linear=None):
             unit_id=f'{context}/{index:06d}'
             delta=differences(dict(parent=a['parent_label'],signature=normalize(ma)),
                               dict(parent=b['parent_label'],signature=normalize(mb)))
-            if delta:
+            shard=embedding_shard_pair(ma,mb,delta)
+            if shard:
+                accepted_shards.append(dict(id=unit_id,source_nodes=[a['id'],b['id']],
+                    original_differences=delta,**shard))
+            if delta and not shard:
                 mismatches.append(unit_id)
                 mismatch_details.append(dict(id=unit_id,source_nodes=[a['id'],b['id']],
                     operators=[a['operator'],b['operator']],differences=delta))
@@ -179,7 +217,7 @@ def build(inventories,linear=None):
     report=dict(status='calibration_tasks_ready_not_parameters_validated',clock_writes=False,deployable=False,
         source_inventory_sha256=bundle['source_inventory_sha256'],pair_occurrences=len(bundle['operators']),
         candidate_families=len(tasks),rank_contract_mismatches=mismatches,
-        rank_mismatch_details=mismatch_details,
+        rank_mismatch_details=mismatch_details,recognized_embedding_shards=accepted_shards,
         family_class_counts=dict(Counter(t['work_class'] for t in tasks.values())),
         static_work_coverage=dict(rank_occurrences=len(source_rows),
             derived=sum(r['work_flop'] is not None for r in source_rows.values()),
@@ -203,6 +241,7 @@ def main():
         f"candidate parameter families: {report['candidate_families']}",
         f"historical linear matches: {report['linear_diagnostic_matches']}",
         f"rank contract mismatches: {len(report['rank_contract_mismatches'])}",
+        f"recognized embedding shard pairs: {len(report['recognized_embedding_shards'])} (structural only; graph join unverified)",
         'Static workload coverage: '+str(report['static_work_coverage']),
         'Family classes: '+str(report['family_class_counts']),
         'Missing (occurrence/family/shared counts, not collection jobs): '+str(report['missing_evidence_counts']),
