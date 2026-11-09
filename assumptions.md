@@ -198,3 +198,15 @@ not a proven exclusive root cause. V2 locates a source-validated unique parent/o
 within each selected context and retains full input/output metadata checks; global
 dispatch ordinals are diagnostic only. Actual mismatches emit field differences.
 Duplicate semantic calls remain fatal, and the first worker failure is retained.
+
+
+## Measured-event partition experiment
+
+Explicit --diagnostic-fastest-time uses minimum paired max-rank median event time,
+with 2250 as the deterministic time tie choice, as diagnostic upstream input only.
+It does not implement energy-optimal Eq1/Eq2 selection. A serial dispatcher-chain
+projection and switch assumptions 5/10/20/50ms are evaluated separately for four
+observed contexts. No cross-context or full-request graph is asserted. Boundary
+wait measurements are reported separately, never relabeled switching latency or
+a calibrated bound. Output stays non-deployable; hypothetical block boundaries
+are not certified by the four earlier selected boundary tests.
