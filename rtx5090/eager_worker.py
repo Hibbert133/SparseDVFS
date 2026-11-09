@@ -77,7 +77,7 @@ class EagerWorker(ObservationWorker):
         value['operator_boundary_version'] = 2
         value['operator_boundary_sha256'] = sha(Path(__file__).parent/'operator_boundary_worker.py')
         value['independent_primitives_version'] = 1
-        value['resource_calibration_version'] = 1
+        value['resource_calibration_version'] = 2
         value['resource_calibration_sha256'] = sha(Path(__file__).parent/'resource_worker.py')
         value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
             ('worker_primitives.py', 'stateless_calibration_adapter.py')}
@@ -100,8 +100,9 @@ class EagerWorker(ObservationWorker):
             mode = command['mode']
             if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives', 'operator_boundary', 'resource_calibration'): raise ValueError('Unsupported mode')
             if mode == 'resource_calibration':
-                from .resource_worker import specification
+                from .resource_worker import specification, window_seconds
                 specification(**command['resource_case'])
+                window_seconds(command.get('resource_window_s',30))
                 if command.get('apply') is not True: raise ValueError('Calibration requires explicit apply')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':

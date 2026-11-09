@@ -3,12 +3,19 @@
 No weight mutation, attention replay, collective replay, profiler or clock writes.
 """
 import time
+import math
 from pathlib import Path
 from .eager_ipc import rpc
 from .observe_core import digest, write_json
 
 
 FAMILIES=('linear','add','mul','copy','cast','rsqrt','reduction')
+
+
+def window_seconds(value):
+    if type(value) not in (int,float) or not math.isfinite(value) or not 10<=value<=120:
+        raise ValueError('Resource window must be finite and between 10 and 120 seconds')
+    return float(value)
 
 
 def specification(family, size, split, seed):
@@ -20,9 +27,10 @@ def specification(family, size, split, seed):
 
 def collect(torch, rank, identity, command):
     spec=specification(**command['resource_case']);n=spec['size'];family=spec['family']
+    duration=window_seconds(command.get('resource_window_s',30))
     path=Path(command['out'])/f'rank-{rank}-resource.json'
     result=dict(status='failed',rank=rank,uuid=identity['gpu_uuid'],identity_sha256=digest(identity),
-        specification=spec,clock_writes=False,same_path_verified=False,synthetic_inputs=True,
+        specification=spec,requested_window_s=duration,clock_writes=False,same_path_verified=False,synthetic_inputs=True,
         cache_state='repeated_working_set_not_matched_to_inference',data_semantics='logical_tensor_bytes')
     try:
         if torch.cuda.is_current_stream_capturing():raise RuntimeError('Graph capture active')
@@ -64,7 +72,7 @@ def collect(torch, rank, identity, command):
         torch.cuda.synchronize();gate(0)
         begin=time.monotonic_ns();iterations=0
         # Repeated homogeneous resource window; synchronization gaps retained.
-        while (time.monotonic_ns()-begin)/1e9<10:
+        while (time.monotonic_ns()-begin)/1e9<duration:
             for _ in range(128):answer=call()
             torch.cuda.synchronize();iterations+=128
         result.update(power_work_begin_ns=begin,power_work_end_ns=time.monotonic_ns(),power_iterations=iterations)

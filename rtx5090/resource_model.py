@@ -195,6 +195,7 @@ def main():
     p.add_argument('--input',required=True);p.add_argument('--model');p.add_argument('--out',required=True)
     a=p.parse_args();data=read(a.input)
     if data.get('status')!='resource_collection_complete':raise ValueError('Complete collection required; no partial fitting')
+    if data.get('collection_role')=='pilot':raise ValueError('Pilot excluded from fitting and validation')
     if a.command=='validate' and not a.model:p.error('--model required for validate')
     result=fit(data['rows']) if a.command=='fit' else validate(read(a.model),data['rows'])
     write_new(Path(a.out),result);print(result.get('status','resource_model_frozen'), 'deployable=False')

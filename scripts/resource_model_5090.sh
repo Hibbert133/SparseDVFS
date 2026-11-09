@@ -16,6 +16,7 @@ export SPARSEDVFS_TRITON_PATH=/mnt/d/s00958243/triton-360
 export TRITON_CACHE_DIR=/tmp/triton360-vllm-cache
 mkdir "$OUT"
 "$PY" -B -m rtx5090.resource_calibration check --run "$RUN" --telemetry configs/service_telemetry.template.json --out "$OUT/check"
+"$PY" -B -m rtx5090.resource_calibration pilot --run "$RUN" --telemetry configs/service_telemetry.template.json --out "$OUT/pilot" --window-seconds 30 --apply --ack-default-auto
 "$PY" -B -m rtx5090.resource_calibration train --run "$RUN" --telemetry configs/service_telemetry.template.json --out "$OUT/train" --apply --ack-default-auto
 "$PY" -B -m rtx5090.resource_model fit --input "$OUT/train/collection.json" --out "$OUT/frozen-model.json"
 "$PY" -B -m rtx5090.resource_calibration holdout --run "$RUN" --telemetry configs/service_telemetry.template.json --out "$OUT/holdout" --model "$OUT/frozen-model.json" --apply --ack-default-auto

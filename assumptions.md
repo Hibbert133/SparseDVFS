@@ -226,3 +226,10 @@ Measured holdout V/f/T yields a CONDITIONAL power diagnostic, not a prospective
 prediction certificate. Sensor feature uncertainty, core-voltage/board scope,
 same-kernel and cache transfer, exact timing-frequency alignment and whole-Qwen
 coverage remain explicit blockers. Numeric validation never removes them.
+
+Resource window v2: first 10-second hardware pilot exceeded the unchanged 3%
+temporal/quantization budget (~5.3% per board). Default is now 30 seconds,
+explicitly configurable within 10..120 seconds and saved in protocol/worker
+evidence. A separate one-window pilot precedes batch collection and is excluded
+from fitting. Version-1 workers are rejected before clock writes. Longer duration
+is an experiment-design choice, not evidence of improved sensor accuracy.

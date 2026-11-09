@@ -18,7 +18,7 @@ from . import eager, service_model as service, service_client, service_telemetry
 from .eager_ipc import LocalServer, Rendezvous
 from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
-from .resource_worker import FAMILIES
+from .resource_worker import FAMILIES, window_seconds
 
 
 class HostWindow:
@@ -67,6 +67,7 @@ async def one(identity, client, out, spec, a):
         try:
             eager.rank_commands(identity,dict(op='arm',mode='resource_calibration',apply=True,out=str(out),
                 request_id=request['request_id'],prompt_hash=request['prompt_hash'],resource_case=spec,
+                resource_window_s=a.window_seconds,
                 resource_coordinator=str(server.path),fingerprint=identity['fingerprint']))
             reply=await client.run(request)
             coverage=eager.coverage(out,identity)
@@ -87,6 +88,9 @@ async def one(identity, client, out, spec, a):
     for rank,uuid in enumerate(GPU_UUIDS):
         report=read(out/f'rank-{rank}-resource.json')
         if report['status']!='resource_labels_collected' or report['identity_sha256']!=digest(identity['ranks'][rank]):raise ValueError('Resource worker evidence mismatch')
+        actual_duration=(report['power_work_end_ns']-report['power_work_begin_ns'])/1e9
+        if report.get('requested_window_s')!=a.window_seconds or actual_duration<a.window_seconds:
+            raise ValueError('Resource duration contract mismatch; resident worker may be stale')
         f=features(raw,uuid)
         # Entire pair envelope, including coordinator and synchronization gaps.
         # No allocation of a mixed inference window to individual calls.
@@ -122,6 +126,8 @@ async def collect(a, identity, devices, out, result):
                     rows=await one(identity,client,out/tag,job['case'],a)
                     for r in rows:r['requested_mhz']=job['requested_mhz']
                     result['rows'].extend(rows);write_new(out/(tag+'.json'),dict(rows=rows))
+                    service.emit(dict(status='resource_energy_gate_passed',window=tag,
+                        relative_budgets={r['uuid']:r['energy_relative_budget'] for r in rows}))
             finally:
                 await service.restore_checked(controller,client,devices,baseline,a.seed+90000,out.name+'restore',out/'restored.json')
     finally:
@@ -132,14 +138,16 @@ async def collect(a, identity, devices, out, result):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command',choices=['check','train','holdout'])
+    p.add_argument('command',choices=['check','pilot','train','holdout'])
     for k in ('run','telemetry','out'):p.add_argument('--'+k,required=True)
     p.add_argument('--base-url',default=service_client.BASE_URL)
     p.add_argument('--windows-python',default='/mnt/c/ProgramData/Anaconda3/python.exe')
     p.add_argument('--families',nargs='+',choices=FAMILIES,default=['linear','add','mul','copy'])
     p.add_argument('--model');p.add_argument('--seed',type=int,default=211100)
+    p.add_argument('--window-seconds',type=float,default=30)
     p.add_argument('--apply',action='store_true');p.add_argument('--ack-default-auto',action='store_true')
     a=p.parse_args()
+    window_seconds(a.window_seconds)
     if a.command!='check' and not(a.apply and a.ack_default_auto):p.error('Collection requires --apply --ack-default-auto')
     if a.command=='holdout' and not a.model:p.error('Freeze training model before holdout: --model required')
     import fcntl
@@ -148,11 +156,12 @@ def main():
         fcntl.flock(lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
         identity=eager.inspect(a.run,a.base_url);out=service.fresh(a.out)
         result=dict(status='failed',clock_writes=False,deployable=False,rows=[],protocol=[],
+            requested_window_s=a.window_seconds,collection_role=a.command,
             identity_fingerprint=identity['fingerprint'],commit=eager.git('rev-parse','HEAD'))
         write_new(out/'identity.json',identity);devices=[]
         try:
-            if any(r.get('resource_calibration_version')!=1 for r in identity['ranks']):
-                raise RuntimeError('NEEDS_NORMAL_RESTART: resource_calibration_version=1 required; no writes')
+            if any(r.get('resource_calibration_version')!=2 for r in identity['ranks']):
+                raise RuntimeError('NEEDS_NORMAL_RESTART: resource_calibration_version=2 required; no writes')
             config=read(a.telemetry)
             if any(c['backend']!='bridge' for c in config):raise ValueError('Require disconnect-recovering bridge')
             devices=telemetry.open_devices(config)
@@ -184,7 +193,11 @@ def main():
                             result['protocol'].append(dict(requested_mhz=rate,case=dict(family=family,size=size,
                                 split='holdout' if a.command=='holdout' else 'train',
                                 seed=a.seed+len(result['protocol'])+(100000 if a.command=='holdout' else 0))))
-            write_new(out/'protocol.json',result['protocol'])
+            if a.command=='pilot':
+                result['protocol']=result['protocol'][:1]
+                result['protocol'][0]['case']['seed']+=200000
+            write_new(out/'protocol.json',dict(jobs=result['protocol'],window_seconds=a.window_seconds,
+                role=a.command,energy_budget_limit=.03))
             if a.command=='check':result['status']='resource_collection_ready_no_writes'
             else:
                 def stop(*_):raise KeyboardInterrupt('Interrupted; attempting pair restoration')

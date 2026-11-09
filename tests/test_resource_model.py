@@ -8,11 +8,16 @@ from types import SimpleNamespace
 from pathlib import Path
 import numpy as np
 from rtx5090.resource_model import solve,fit_latency,select_budget,resource_class,fit,validate
-from rtx5090.resource_worker import specification
+from rtx5090.resource_worker import specification,window_seconds
 from rtx5090.resource_calibration import HostWindow
 
 
 class ResourceTests(unittest.TestCase):
+    def test_bounded_configurable_duration(self):
+        self.assertEqual(window_seconds(30),30)
+        self.assertEqual(window_seconds(120),120)
+        for value in (True,0,9,121,float('nan'),float('inf'),'30'):
+            with self.assertRaises(ValueError):window_seconds(value)
     def test_budget_is_not_fastest_only(self):
         c={2250:dict(latency_s=1.02,energy_j=1),2527:dict(latency_s=1,energy_j=2)}
         self.assertEqual(select_budget(c,1.03),2250)
