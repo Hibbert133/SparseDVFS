@@ -35,3 +35,20 @@ capture/service 身份绑定及缺失成本。软件 SQLite fixture 测试不代
 
 下一阶段输入仍需同服务、两个频点的逐执行单元或整块延迟/能量，以及实际双rank合法边界。
 在这些输入完整之前，现有 `partition_dryrun` 不能发出可执行硬件计划。
+
+## 复用常驻 worker 补两频点 linear 响应
+
+`python -B -m rtx5090.linear_frequency_probe --run RUN --telemetry CONFIG --out OUT`
+默认只读；实际采集必须另外提供 `--apply --ack-default-auto`。此命令在 WSL 执行。
+先获取服务 client.lock，实时检查两个 worker 的身份和 matrix_replay_version，
+不更改 worker、不重启服务。采用已有 matrix_replay（不启用 kernel profiler），
+保留每个频点三个独立请求、每请求每种形状三批 N32 的全部结果和读回。
+两频点顺序按重复轮换，正式模型拟合/独立验证另行冻结协议，当前输出仅为响应诊断。
+
+每次设置后运行三次512/64请求预调节，再采一条真实张量回放请求；预调节不是精确锁频
+验收，也不把本轮GPC观测转换为通用等待上界。成功和异常都尝试恢复，并由三条带载请求
+核实。失败保留数据，禁止丢样本拟合。bridge EOF恢复是补充保护；强杀或断电不保证验证。
+
+范围仍仅第一处MLP的prefill/decode gate_up/down linear；不是完整64层成本。
+kernel匹配和缓存状态不会因运行此命令而变成已通过。遥测只描述当时的频率/温度等上下文，
+不输出算子能量，不把插桩请求耗时作为正式服务基线。
