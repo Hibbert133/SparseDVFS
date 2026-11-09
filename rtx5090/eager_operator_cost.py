@@ -8,8 +8,9 @@ from sparsedvfs_vllm.operators import tensor_metadata
 
 class OperatorCost(Observer):
     def __init__(self, model, rank, context):
-        super().__init__(model, rank, context, 30000)
+        super().__init__(model, rank, context, 60000)
         self.ordinals = {}
+        self.contexts = ('prefill', 'decode.0', 'decode.31', 'decode.62')
 
     def dispatch(self, func, args, kwargs):
         if self.busy:
@@ -18,8 +19,8 @@ class OperatorCost(Observer):
         if context is None:
             return func(*args, **kwargs)
         key = context_key(context)
-        # Two exact scheduler contexts; never silently extrapolate to other KV lengths.
-        if key not in ('prefill', 'decode.0'):
+        # Representative early/middle/last positions; not full decode coverage.
+        if key not in self.contexts:
             return func(*args, **kwargs)
         self.busy = True
         try:

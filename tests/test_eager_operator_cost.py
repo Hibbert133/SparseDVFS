@@ -43,8 +43,12 @@ class OperatorExecutionTests(unittest.TestCase):
         observer.dispatch(attention,(),{})
         self.assertEqual(len(calls),2)
         self.assertEqual(len(observer.rows),1)
+        for position in (31,62):
+            context['num_computed_tokens']=512+position
+            observer.dispatch(attention,(),{})
+        self.assertEqual(len(observer.rows),3)
         context['num_computed_tokens']=512
         def failed():raise RuntimeError('CUDA failed')
         with self.assertRaises(RuntimeError):observer.dispatch(failed,(),{})
         self.assertFalse(observer.busy)
-        self.assertEqual(len(observer.rows),2)  # Failed raw occurrence retained.
+        self.assertEqual(len(observer.rows),4)  # Failed raw occurrence retained.

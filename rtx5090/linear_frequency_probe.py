@@ -29,6 +29,9 @@ def summarize_operator_cost(observation, identity, directory):
         if (report['status'] != 'operator_event_envelopes_collected' or report['rank'] != rank or
                 report['uuid'] != GPU_UUIDS[rank] or report['identity_sha256'] != digest(identity['ranks'][rank])):
             raise ValueError('Operator cost rank/identity mismatch')
+        expected = ('prefill', 'decode.0', 'decode.31', 'decode.62') if identity['ranks'][rank].get('operator_cost_version', 0)>=2 else ('prefill', 'decode.0')
+        if report.get('contexts')!=list(expected):
+            raise ValueError('Operator context contract differs from worker capability')
         covered = set()
         indices = {}
         ordinals = {}
@@ -41,7 +44,7 @@ def summarize_operator_cost(observation, identity, directory):
             if not match:
                 continue  # Explicit transformer-layer subgraph, not full request costs.
             layer = int(match.group(1)); context = row['context']
-            if context not in ('prefill', 'decode.0') or not 0 <= layer < 64 or row.get('rank') != rank:
+            if context not in expected or not 0 <= layer < 64 or row.get('rank') != rank:
                 raise ValueError('Unexpected operator context/layer/rank')
             if row['stream_changed']:
                 raise ValueError('Current stream changed across operator; cannot use event envelope')
@@ -57,7 +60,7 @@ def summarize_operator_cost(observation, identity, directory):
                 kernel_names_verified=False, zero_duration_unresolved=value == 0,
                 source_ordinal=row['ordinal'], layer=layer,
                 timing_scope='single_execution_current_stream_envelope_not_kernel_time')
-        if covered != {(c, l) for c in ('prefill', 'decode.0') for l in range(64)}:
+        if covered != {(c, l) for c in expected for l in range(64)}:
             raise ValueError('Missing transformer layer/context in operator capture')
     return result
 
@@ -288,7 +291,7 @@ def main():
                       clock_writes=False, exact_lock_verified=False, deployable=False,
                       energy_measured=False, frequency_scaling_validated=False,
                       scope=('first_MLP_projection_per_phase_repeated_linear_timing_not_whole_blocks' if a.scope == 'linear'
-                             else 'transformer_layer_operator_events_prefill_decode0_only' if a.scope == 'operators'
+                             else 'transformer_layer_operator_events_explicit_worker_contexts_not_all_decode_positions' if a.scope == 'operators'
                              else 'full_module_current_stream_event_diagnostics_not_whole_block_critical_path'),
                       telemetry_config_sha256=digest(config), commit=eager.git('rev-parse','HEAD'))
         devices = []

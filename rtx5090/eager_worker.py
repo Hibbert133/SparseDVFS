@@ -72,7 +72,7 @@ class EagerWorker(ObservationWorker):
             boundary_completion='device_synchronize_all_streams_serial_diagnostic',
             resolved_weight_loader='auto_actual_loader_class_not_observed')
         value['matrix_replay_version'] = 2
-        value['operator_cost_version'] = 1
+        value['operator_cost_version'] = 2
         value['independent_primitives_version'] = 1
         value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
             ('worker_primitives.py', 'stateless_calibration_adapter.py')}
@@ -225,7 +225,7 @@ class EagerWorker(ObservationWorker):
                     write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-operator-cost.json',
                         dict(status='operator_event_envelopes_collected', rank=int(self.rank),
                              uuid=self._eg_identity['gpu_uuid'], identity_sha256=digest(self._eg_identity),
-                             rows=self._eg_operator_cost.rows, contexts=['prefill', 'decode.0'],
+                             rows=self._eg_operator_cost.rows, contexts=list(self._eg_operator_cost.contexts),
                              scope='execute_model_only_excludes_sample_tokens',
                              timing='instrumented_current_stream_event_envelope_includes_launch_gaps',
                              all_stream_completion_per_operator_verified=False,
