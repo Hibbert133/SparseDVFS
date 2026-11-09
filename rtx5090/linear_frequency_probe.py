@@ -15,6 +15,53 @@ from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
 
 
+def summarize_operator_cost(observation, identity, directory):
+    import re
+    if (observation.get('status') != 'complete' or
+            observation['identity_fingerprint'] != identity['fingerprint'] or
+            not observation['coverage']['passed'] or not observation['cache_isolation']['miss_verified'] or
+            observation['reply']['usage'].get('prompt_tokens') != 512 or
+            observation['reply']['usage'].get('completion_tokens') != 64):
+        raise ValueError('Operator collection requires verified same-session 512/64 cache miss')
+    result = {}
+    for rank in (0, 1):
+        report = read(Path(directory)/('rank-%d-operator-cost.json' % rank))
+        if (report['status'] != 'operator_event_envelopes_collected' or report['rank'] != rank or
+                report['uuid'] != GPU_UUIDS[rank] or report['identity_sha256'] != digest(identity['ranks'][rank])):
+            raise ValueError('Operator cost rank/identity mismatch')
+        covered = set()
+        indices = {}
+        ordinals = {}
+        for row in report['rows']:
+            context = row['context']
+            if row['ordinal'] != ordinals.get(context, 0):
+                raise ValueError('Operator ordinals missing/duplicated/reordered')
+            ordinals[context] = row['ordinal']+1
+            match = re.search(r'(?:^|\.)layers\.(\d+)(?:\.|$)', row['parent'])
+            if not match:
+                continue  # Explicit transformer-layer subgraph, not full request costs.
+            layer = int(match.group(1)); context = row['context']
+            if context not in ('prefill', 'decode.0') or not 0 <= layer < 64 or row.get('rank') != rank:
+                raise ValueError('Unexpected operator context/layer/rank')
+            if row['stream_changed']:
+                raise ValueError('Current stream changed across operator; cannot use event envelope')
+            value = row['stream_event_ms']/1000
+            if not math.isfinite(value) or value < 0:
+                raise ValueError('Invalid operator event duration')
+            covered.add((context, layer))
+            index = indices.get(context, 0); indices[context] = index+1
+            key = '%d:%s/%06d' % (rank, context, index)
+            contract = dict(overload=row['overload'], inputs=row['inputs'], outputs=row['outputs'])
+            result[key] = dict(uuid=GPU_UUIDS[rank], parent=row['parent'], shape=contract,
+                batch_means_s=[value], median_s=value, host_dispatch_s=row['host_dispatch_s'],
+                kernel_names_verified=False, zero_duration_unresolved=value == 0,
+                source_ordinal=row['ordinal'], layer=layer,
+                timing_scope='single_execution_current_stream_envelope_not_kernel_time')
+        if covered != {(c, l) for c in ('prefill', 'decode.0') for l in range(64)}:
+            raise ValueError('Missing transformer layer/context in operator capture')
+    return result
+
+
 def summarize_units(observation, identity, directory):
     from .eager_core import UNITS
     if (observation.get('status') != 'complete' or
@@ -87,6 +134,8 @@ def compare(windows):
     if len(windows) != 6:
         raise ValueError('Require all six observations; no partial fitting')
     output = []
+    if any(set(w['operators']) != set(windows[0]['operators']) for w in windows):
+        raise ValueError('Operator occurrence set changed; no missing rows dropped')
     for key in sorted(windows[0]['operators']):
         reference = windows[0]['operators'][key]
         for w in windows:
@@ -158,7 +207,8 @@ async def collect(a, identity, devices, out, result):
                             observation = await eager.observe(SimpleNamespace(
                                 identity=str(out/'identity.json'), out=str(out/tag),
                                 seed=a.seed+10000+repeat*10+(rate==2527),
-                                matrix_replay=a.scope == 'linear', matrix_calibrate=False, trace=False))
+                                matrix_replay=a.scope == 'linear', matrix_calibrate=False, trace=False,
+                                operator_cost=a.scope == 'operators'))
                         finally:
                             await asyncio.to_thread(sampler.finish)
                             write_new(out/(tag+'-telemetry.json'), dict(frames=sampler.frames, errors=sampler.errors))
@@ -176,6 +226,7 @@ async def collect(a, identity, devices, out, result):
                                       observation_sha256=digest(observation),
                                       prompt_hash=observation['reply']['prompt_hash'],
                                       operators=(summarize(observation, identity['fingerprint']) if a.scope == 'linear'
+                                                 else summarize_operator_cost(observation, identity, out/tag) if a.scope == 'operators'
                                                  else summarize_units(observation, identity, out/tag)))
                         result['windows'].append(window)
                         write_new(out/(tag+'-summary.json'), window)
@@ -212,7 +263,7 @@ def main():
         p.add_argument('--'+name, required=True)
     p.add_argument('--base-url', default=service_client.BASE_URL)
     p.add_argument('--seed', type=int, default=16000100)
-    p.add_argument('--scope', choices=('linear', 'modules'), default='linear')
+    p.add_argument('--scope', choices=('linear', 'modules', 'operators'), default='linear')
     p.add_argument('--apply', action='store_true')
     p.add_argument('--ack-default-auto', action='store_true')
     a = p.parse_args()
@@ -224,6 +275,8 @@ def main():
     with (Path(launch['runtime'])/'client.lock').open('a') as lease:
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         identity = eager.inspect(a.run, a.base_url)
+        if a.scope == 'operators' and any(r.get('operator_cost_version', 0) < 1 for r in identity['ranks']):
+            raise ValueError('Resident workers lack operator_cost_version=1; normal restart required BEFORE clock writes')
         if a.scope == 'linear' and any(rank.get('matrix_replay_version', 0) < 1 for rank in identity['ranks']):
             raise ValueError('Resident workers do not support matrix replay; no writes')
         config = read(a.telemetry)
@@ -235,6 +288,7 @@ def main():
                       clock_writes=False, exact_lock_verified=False, deployable=False,
                       energy_measured=False, frequency_scaling_validated=False,
                       scope=('first_MLP_projection_per_phase_repeated_linear_timing_not_whole_blocks' if a.scope == 'linear'
+                             else 'transformer_layer_operator_events_prefill_decode0_only' if a.scope == 'operators'
                              else 'full_module_current_stream_event_diagnostics_not_whole_block_critical_path'),
                       telemetry_config_sha256=digest(config), commit=eager.git('rev-parse','HEAD'))
         devices = []
@@ -261,7 +315,7 @@ def main():
             write_new(out/'collection.json', result)
         lines = [result['status'], 'Two requested settings; actual readbacks retained. No operator energy or block plan.']
         comparisons = result.get('comparison', [])
-        if a.scope == 'modules':
+        if a.scope in ('modules', 'operators'):
             if result['status'] == 'two_setting_modules_timing_complete':
                 write_new(out/'module-budget-input.json', module_input(result))
                 lines.append('module-budget-input.json contains measured event diagnostics and explicit missing energy/budget fields.')

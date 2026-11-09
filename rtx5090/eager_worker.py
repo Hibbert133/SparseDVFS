@@ -30,6 +30,7 @@ class EagerWorker(ObservationWorker):
         self._eg_rows, self._eg_events, self._eg_steps, self._eg_handles = [], [], [], []
         self._eg_seq = 0
         self._eg_replay = None
+        self._eg_operator_cost = None
         model = self.model_runner.get_model()
         modules, self._eg_layer_types = discover(model)
         for name, module in modules:
@@ -71,6 +72,7 @@ class EagerWorker(ObservationWorker):
             boundary_completion='device_synchronize_all_streams_serial_diagnostic',
             resolved_weight_loader='auto_actual_loader_class_not_observed')
         value['matrix_replay_version'] = 2
+        value['operator_cost_version'] = 1
         # The two-rank check is performed by the client after BOTH files exist.
         if not value['compilation_disabled'] or not value['graphs_disabled']:
             raise RuntimeError('Eager did not disable compile/graphs in actual worker config')
@@ -88,7 +90,7 @@ class EagerWorker(ObservationWorker):
                 raise RuntimeError('Configure only between complete requests')
             if command['op'] != 'arm': raise ValueError('Unknown eager RPC operation')
             mode = command['mode']
-            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate'): raise ValueError('Unsupported mode')
+            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost'): raise ValueError('Unsupported mode')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':
                 core.validate_plan(command['plan'], command['fingerprint'])
@@ -113,6 +115,10 @@ class EagerWorker(ObservationWorker):
             self._eg_tracker = PhaseTracker()
             self._eg_rows, self._eg_events, self._eg_steps = [], [], []
             self._eg_seq = 0
+            if self._eg_mode == 'operator_cost':
+                from .eager_operator_cost import OperatorCost
+                self._eg_operator_cost = OperatorCost(self.model_runner.get_model(), int(self.rank),
+                                                      lambda: self._eg_context)
             if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                 from .eager_matrix_replay import MatrixReplay
                 self._eg_replay = MatrixReplay(self.model_runner.get_model(), int(self.rank),
@@ -177,7 +183,10 @@ class EagerWorker(ObservationWorker):
                     raise RuntimeError('An unrelated request arrived while experiment was armed')
             self._eg_key = core.context_key(context)
             self._eg_order, self._eg_open = [], None
-            if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
+            if self._eg_mode == 'operator_cost':
+                with self._eg_operator_cost.scope():
+                    result = super().execute_model(scheduler_output)
+            elif self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                 with self._eg_replay.scope():
                     result = super().execute_model(scheduler_output)
             else:
@@ -205,6 +214,18 @@ class EagerWorker(ObservationWorker):
                     self._eg_rows.append(dict(row, stream_event_ms=start.elapsed_time(end)))
                 self._eg_events.clear()
                 if self._eg_mode == 'observe': self.observation_stop()
+                if self._eg_mode == 'operator_cost':
+                    self._eg_operator_cost.finish()
+                    write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-operator-cost.json',
+                        dict(status='operator_event_envelopes_collected', rank=int(self.rank),
+                             uuid=self._eg_identity['gpu_uuid'], identity_sha256=digest(self._eg_identity),
+                             rows=self._eg_operator_cost.rows, contexts=['prefill', 'decode.0'],
+                             scope='execute_model_only_excludes_sample_tokens',
+                             timing='instrumented_current_stream_event_envelope_includes_launch_gaps',
+                             all_stream_completion_per_operator_verified=False,
+                             equation_1_parameters_validated=False, energy_measured=False))
+                    self._eg_operator_cost.close()
+                    self._eg_operator_cost = None
                 if self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
                     from .eager_matrix_replay import validate_rows
                     validate_rows(self._eg_replay.rows)
@@ -231,7 +252,12 @@ class EagerWorker(ObservationWorker):
             self._eg_failure(exc); raise
 
     def _eg_failure(self, exc):
-        if self._eg_replay is not None:
+        if getattr(self, '_eg_operator_cost', None) is not None:
+            self._eg_operator_cost.close()
+            write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-operator-cost-failed.json',
+                       dict(status='failed', rows=self._eg_operator_cost.rows, error=safe_error(exc)))
+            self._eg_operator_cost = None
+        if getattr(self, '_eg_replay', None) is not None:
             self._eg_replay.close()
             write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-matrix-replay-failed.json',
                        dict(status='failed', rows=self._eg_replay.rows, error=safe_error(exc)))

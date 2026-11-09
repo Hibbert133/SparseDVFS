@@ -104,7 +104,7 @@ def plan(data):
 
 
 def fixture():
-    value = demo()
+    value = demo(include_energy=True)
     value.update(request_budget=dict(reference_s=.05, max_increase=.05, fixed_overhead_s=.005,
                                     reference_scope='synthetic_software_fixture'),
                  switch_energy_j=0.0, initial_mhz=2527)

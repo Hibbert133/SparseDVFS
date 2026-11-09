@@ -225,6 +225,9 @@ async def observe(args):
     identity = checked(args.identity)
     calibrate = getattr(args, 'matrix_calibrate', False)
     replay = getattr(args, 'matrix_replay', False) or calibrate
+    operator_cost = getattr(args, 'operator_cost', False)
+    if operator_cost and any(r.get('operator_cost_version', 0) < 1 for r in identity['ranks']):
+        raise ValueError('Resident workers lack operator_cost_version=1; normal restart required, no writes')
     version = 2 if calibrate else 1
     if replay and any(r.get('matrix_replay_version', 0) < version for r in identity['ranks']):
         raise ValueError('Running workers lack matrix replay. Prepare/check new launcher before a user-operated restart.')
@@ -238,7 +241,7 @@ async def observe(args):
             result['client_provenance'] = dict(commit=git('rev-parse', 'HEAD'),
                 eager_sha256=client_api.sha(__file__), service_client_sha256=client_api.sha(client_api.__file__))
             write_new(out/'request.json', request)
-            rank_commands(identity, dict(op='arm', mode='matrix_calibrate' if calibrate else 'matrix_replay' if replay else 'observe' if args.trace else 'units',
+            rank_commands(identity, dict(op='arm', mode='operator_cost' if operator_cost else 'matrix_calibrate' if calibrate else 'matrix_replay' if replay else 'observe' if args.trace else 'units',
                 out=str(out), request_id=request['request_id'], prompt_hash=request['prompt_hash']))
             result['reply'] = await client.run(request)
             result['coverage'] = coverage(out, identity)

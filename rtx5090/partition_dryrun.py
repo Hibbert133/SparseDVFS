@@ -82,11 +82,14 @@ def partition(data, choices=None):
     return result
 
 
-def demo():
+def demo(include_energy=False):
     nodes=['a','b','c','tail'];table={}
     for n,t,low in [('a',.002,True),('b',.020,False),('c',.010,True),('tail',.001,False)]:
-        table[n]={'2250':dict(pair_latency_s=t*(1.02 if low else 1.2),pair_energy_j=t*100),
-                  '2527':dict(pair_latency_s=t,pair_energy_j=t*150)}
+        table[n]={'2250':dict(pair_latency_s=t*(1.02 if low else 1.2)),
+                  '2527':dict(pair_latency_s=t)}
+        if include_energy:
+            table[n]['2250']['pair_energy_j']=t*100
+            table[n]['2527']['pair_energy_j']=t*150
     return dict(schema='pair-partition-input-v1',synthetic=True,scope='synthetic_software_fixture',
         nodes=nodes,edges=list(zip(nodes,nodes[1:])),candidates=table,switch_s=.001,
         selected_frequencies=dict(a=2250,b=2527,c=2250,tail=2527))

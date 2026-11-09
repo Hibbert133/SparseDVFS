@@ -37,7 +37,7 @@ class PartitionTests(unittest.TestCase):
     def test_energy_absent_does_not_block_partition(self):
         d=demo()
         for rows in d['candidates'].values():
-            for row in rows.values():row.pop('pair_energy_j')
+            for row in rows.values():row.pop('pair_energy_j',None)
         r=partition(d)
         self.assertEqual(r['status'],'offline_partition_complete')
         self.assertEqual(r['choices'],d['selected_frequencies'])

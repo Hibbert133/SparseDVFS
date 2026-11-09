@@ -184,8 +184,8 @@ def plan(model, validation, coverage, switching, temperature):
         temperature_c=temperature, N=5, similarity=.05, latency_budget=1.05,
         scope='GPU_pair_module_chain_projection_not_full_paper_mechanisms',
         temperature_ranges={r: v['temperature_range_c'] for r, v in model['thermal'].items()},
-        choices='minimum_predicted_board_energy_under_per_unit_high_frequency_5pct_budget',
-        deadline_note='per-unit budget does not certify HTTP end-to-end 5pct; must compare to AUTO',
+        choices='minimum_predicted_board_energy_among_fastest_predicted_candidates',
+        deadline_note='No per-unit slowdown allowed; HTTP end-to-end 5pct still requires AUTO comparison',
         source='Eq1_Eq2_Algorithm1', switch_s=switch_s)
     result['excluded_prompt_hashes'] = sorted(set(model['training_prompts']) | set(validation['validation_prompts']))
     result['lookahead_bound_verified'] = switching.get('fine_boundary_precision_verified') is True
@@ -201,7 +201,8 @@ def plan(model, validation, coverage, switching, temperature):
                 table[unit][mhz] = (seconds, energy)
         choices = {}
         for unit, candidates in table.items():
-            feasible = [f for f in core.RATES if candidates[f][0] <= candidates[2527][0]*1.05]
+            fastest = min(v[0] for v in candidates.values())
+            feasible = [f for f in core.RATES if candidates[f][0] <= fastest]
             choices[unit] = min(feasible, key=lambda f: (candidates[f][1], candidates[f][0], f))
         blocks, decisions = greedy_partition(OrderedDAG.chain(core.UNITS),
             lambda u: (choices[u], choices[u]),

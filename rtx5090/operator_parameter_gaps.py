@@ -1,0 +1,150 @@
+"""Offline exact-signature reuse inventory and deduplicated calibration tasks."""
+import argparse
+from collections import Counter,defaultdict
+import math
+from pathlib import Path
+from .observe_core import GPU_UUIDS,digest
+from .service_core import read,write_new
+from .operator_equations import audit
+from .eager_matrix_replay import case_spec
+
+
+def normalize(value):
+    if isinstance(value,dict):
+        return {k:('cuda:rank' if k=='device' and v in ('cuda:0','cuda:1') else normalize(v))
+                for k,v in value.items() if k not in ('rank','kernel_names')}
+    if isinstance(value,list):return [normalize(v) for v in value]
+    return value
+
+
+def linear_work(meta):
+    if meta.get('overload')!='aten.linear.default':return None
+    args=meta.get('inputs',{}).get('args',[]);output=meta.get('outputs',{})
+    if len(args) not in (2,3) or (len(args)==3 and args[2] is not None):return None
+    a,b=args[:2]
+    if not all(isinstance(x,dict) and x.get('tensor') and x.get('dtype')=='torch.bfloat16' for x in (a,b,output)):
+        return None
+    shape=a['shape'];weight=b['shape']
+    if not shape or len(weight)!=2 or shape[-1]!=weight[1] or output['shape']!=shape[:-1]+[weight[0]]:
+        return None
+    if any(type(x) is not int or x<=0 for x in shape+weight):return None
+    m=math.prod(shape[:-1]);n,k=weight
+    return dict(work_flop=2*m*n*k,data_byte=2*(m*k+n*k+m*n),M=m,N=n,K=k)
+
+
+def build(inventories,linear=None):
+    if len(inventories)!=2:raise ValueError('Two rank inventories required')
+    for rank,inv in enumerate(inventories):
+        if inv['rank']!=rank or inv['identity']['gpu_uuid']!=GPU_UUIDS[rank]:raise ValueError('Inventory UUID mismatch')
+        ids=[n['id'] for n in inv['nodes']]
+        if len(ids)!=len(set(ids)):raise ValueError('Duplicate source occurrences')
+    if linear and (linear.get('status')!='two_setting_linear_timing_complete' or not linear.get('restoration',{}).get('verified')):
+        raise ValueError('Historical linear collection is incomplete or restoration unverified')
+    bundle=dict(schema='operator-equations-v1',scope='historical_operator_inventory_contexts_only',
+        identity_fingerprint=None,current_identity_verified=False,rank_join_verified=False,
+        rank_join_evidence_sha256=None,
+        units_contract=dict(time='s',work='FLOP',data='byte',frequency='Hz',voltage='V',power='W'),
+        operators=[],families={},thermal={},states={},switch_s=None,switch_bound_verified=False,
+        graph=dict(edges=None,timing_model=None,dependency_evidence_sha256=None),
+        source_inventory_sha256=[digest(i) for i in inventories])
+    tasks={};source_rows={};prior_matches=[]
+    for rank,inv in enumerate(inventories):
+        for node in inv['nodes']:
+            meta=inv['signatures'][node['signature_id']]
+            grouping=dict(rank=rank,phase=node['context'].split('.')[0],operator=node['operator'],
+                          kernels=sorted(node['kernels']))
+            # Grouping proposes capacity reuse; exact signature validation is still required.
+            family_id=f"rank{rank}-"+digest(grouping)[:20]
+            if family_id not in tasks:
+                family=dict(rank=rank,signature_ids=[],same_path_verified=False,path_evidence_sha256=None,
+                    independent_capacity_calibration=False,capacity_evidence_sha256=None,
+                    alpha=None,overhead_s=None,power_scope=None,paired_window_verified=False,
+                    power_evidence_sha256=None,validation=None,
+                    capacities={str(f):dict(peak_flops=None,bandwidth_Bps=None,frequency_range_hz=None) for f in (2250,2527)})
+                bundle['families'][family_id]=family
+                op=node['operator']
+                policy=('paired_ranks_only' if 'all_reduce' in op or 'all_gather' in op else
+                        'original_once_or_verified_written_state_restore' if 'attention' in op or 'cache' in op else
+                        'classify_metadata_copy_or_kernel_first' if not node['kernels'] else
+                        'original_once_until_replay_adapter_validated')
+                tasks[family_id]=dict(id=family_id,**grouping,occurrences=0,signature_ids=[],
+                    representative=node['id'],representative_context=node['context'],
+                    representative_parent=node['parent_label'],representative_layer=node['layer'],
+                    replay_policy=policy,control_settings=[2250,2527],reuse_validated=False,
+                    required=['path_state_kernel_evidence','independent_capacity_bandwidth_overhead',
+                              'activity_alpha_at_effective_sparsity_zero','independent_holdout'],
+                    static_work_definitions_missing=0)
+            family=bundle['families'][family_id];task=tasks[family_id]
+            if node['signature_id'] not in family['signature_ids']:
+                family['signature_ids'].append(node['signature_id']);task['signature_ids'].append(node['signature_id'])
+            task['occurrences']+=1
+            priority=lambda layer: {1:0,3:1,0:2}.get(layer,3)
+            if priority(node['layer'])<priority(task['representative_layer']):
+                task.update(representative=node['id'],representative_context=node['context'],
+                            representative_parent=node['parent_label'],representative_layer=node['layer'])
+            work=linear_work(meta)
+            if work is None:task['static_work_definitions_missing']+=1
+            row=dict(rank=rank,uuid=GPU_UUIDS[rank],signature_id=node['signature_id'],family_id=family_id,
+                work_flop=work['work_flop'] if work else None,data_byte=work['data_byte'] if work else None,
+                workload_provenance=(inv.get('source_sha256') or digest(inv)) if work else None,
+                data_semantics='logical_tensor_bytes_not_measured_DRAM' if work else None,s_comp=0,s_mem=0)
+            source_rows[(rank,node['id'])]=row
+            if linear and work:
+                try:
+                    spec=case_spec(node['parent_label'],node['context'].split('.')[0],node['operator'],
+                                   meta['inputs']['args'],meta['outputs'],rank)
+                except (ValueError,KeyError,TypeError):spec=None
+                if spec:
+                    name=f"{rank}:{spec['phase']}/{spec['module']}"
+                    rows=[w['operators'].get(name) for w in linear['windows']]
+                    if rows and all(r and r['uuid']==GPU_UUIDS[rank] and r['shape']==[spec['M'],spec['N'],spec['K']] for r in rows):
+                        prior_matches.append(dict(node=node['id'],rank=rank,linear_case=name,
+                            use='historical_repeated_linear_diagnostic_only',parameters_authorized=False))
+    by_context=[defaultdict(list),defaultdict(list)]
+    for r,inv in enumerate(inventories):
+        for node in inv['nodes']:by_context[r][node['context']].append(node)
+    mismatches=[]
+    if set(by_context[0])!=set(by_context[1]):raise ValueError('Rank contexts differ')
+    for context,left in by_context[0].items():
+        right=by_context[1][context]
+        if len(left)!=len(right):raise ValueError('Rank occurrence counts differ: '+context)
+        for index,(a,b) in enumerate(zip(left,right)):
+            ma=inventories[0]['signatures'][a['signature_id']];mb=inventories[1]['signatures'][b['signature_id']]
+            unit_id=f'{context}/{index:06d}'
+            if a['parent_label']!=b['parent_label'] or normalize(ma)!=normalize(mb):mismatches.append(unit_id)
+            bundle['operators'].append(dict(id=unit_id,context=context,
+                source_nodes=[a['id'],b['id']],ranks=[source_rows[(0,a['id'])],source_rows[(1,b['id'])]]))
+    for r in (0,1):
+        bundle['thermal'][str(r)]=dict(k1=None,k2=None,identifiability_passed=False,
+                                       evidence_sha256=None,temperature_range_c=None,voltage_range_v=None)
+        bundle['states'][str(r)]={str(f):dict(effective_frequency_hz=None,voltage_v=None,temperature_c=None,
+            known_before_prediction=False,evidence_sha256=None) for f in (2250,2527)}
+    report=dict(status='calibration_tasks_ready_not_parameters_validated',clock_writes=False,deployable=False,
+        source_inventory_sha256=bundle['source_inventory_sha256'],pair_occurrences=len(bundle['operators']),
+        candidate_families=len(tasks),rank_contract_mismatches=mismatches,
+        linear_diagnostic_matches=len(prior_matches),linear_matches=prior_matches,
+        linear_source_sha256=digest(linear) if linear else None,
+        tasks=list(tasks.values()),missing_evidence_counts=dict(Counter(x['reason'] for x in audit(bundle))),
+        shared_tasks=[dict(rank=r,uuid=GPU_UUIDS[r],required=['identifiable_shared_k1_k2',
+            'pre_prediction_voltage_frequency_temperature_mapping','dual_rank_dependency_and_boundary_evidence']) for r in (0,1)],
+        note='Family grouping is a calibration proposal, not permission to share unvalidated parameters')
+    return bundle,report
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--inventory',required=True)
+    p.add_argument('--linear');p.add_argument('--out',required=True);a=p.parse_args()
+    root=Path(a.inventory);out=Path(a.out);out.mkdir(parents=True,exist_ok=False)
+    bundle,report=build([read(root/f'rank-{r}.json') for r in (0,1)],read(a.linear) if a.linear else None)
+    write_new(out/'equations-template.json',bundle);write_new(out/'calibration-tasks.json',report)
+    lines=[report['status'],f"pair occurrences: {report['pair_occurrences']}",
+        f"candidate parameter families: {report['candidate_families']}",
+        f"historical linear matches: {report['linear_diagnostic_matches']}",
+        f"rank contract mismatches: {len(report['rank_contract_mismatches'])}",
+        'Missing: '+str(report['missing_evidence_counts']),
+        'No service access, restart, new sampling or clock writes.']
+    (out/'REPORT.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    print('\n'.join(lines));print('Saved:',out)
+
+
+if __name__=='__main__':main()
