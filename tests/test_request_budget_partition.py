@@ -19,7 +19,7 @@ def case():
 class BudgetTests(unittest.TestCase):
     def test_global_budget_allows_locally_slow_operator(self):
         d=case()
-        self.assertEqual(partition(d)['choices']['a'],2527)
+        self.assertEqual(partition(d)['status'],'blocked_missing_inputs')
         r=plan(d)
         self.assertEqual(r['before_partition']['choices']['a'],2250)
         self.assertTrue(r['request_budget_met'])

@@ -26,12 +26,37 @@ class PartitionTests(unittest.TestCase):
     def test_eq3_equality_and_reordered_edges(self):
         d=demo(); d['nodes']=['c','tail']; d['edges']=[('c','tail')]
         d['candidates']={n:d['candidates'][n] for n in d['nodes']}
+        d['selected_frequencies']={n:d['selected_frequencies'][n] for n in d['nodes']}
         d['candidates']['c']['2250']['pair_latency_s']=.005
         r=partition(d)
         self.assertFalse(r['decisions'][0]['short'])
         self.assertFalse(r['blocks'][0]['amortized_strict_gt'])
         d['edges']=[('tail','c')]
         with self.assertRaises(ValueError): partition(d)
+
+    def test_energy_absent_does_not_block_partition(self):
+        d=demo()
+        for rows in d['candidates'].values():
+            for row in rows.values():row.pop('pair_energy_j')
+        r=partition(d)
+        self.assertEqual(r['status'],'offline_partition_complete')
+        self.assertEqual(r['choices'],d['selected_frequencies'])
+        self.assertNotIn('total_model_energy_j',r)
+        del d['selected_frequencies']
+        self.assertEqual(partition(d)['blockers'][0]['reason'],'missing_upstream_frequency_predictions')
+
+    def test_time_recomputed_after_conservative_merge(self):
+        d=demo();r=partition(d)
+        first=r['blocks'][0]
+        self.assertAlmostEqual(first['estimated_s'],sum(d['candidates'][n]['2527']['pair_latency_s'] for n in first['nodes']))
+
+    def test_resource_dag_uses_critical_path_not_sum(self):
+        d=demo();d.update(schema='pair-partition-input-v2',timing_model='resource_dag',
+                         dependency_evidence_sha256='fixture',switch_s=1)
+        d['edges']=[('a','c'),('b','c'),('c','tail')]
+        d['selected_frequencies']={n:2527 for n in d['nodes']}
+        r=partition(d)
+        self.assertAlmostEqual(r['compute_s'],.031)
 
     def test_holdout_does_not_select(self):
         def w(t,e): return [dict(latency_s=t,energy_j=e)]

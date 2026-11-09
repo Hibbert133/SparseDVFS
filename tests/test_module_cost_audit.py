@@ -10,9 +10,7 @@ class ModuleAuditTests(unittest.TestCase):
         d=demo()
         for rows in d['candidates'].values():
             for row in rows.values(): row['pair_energy_j']=None
-        blocker=partition(d)['blockers'][0]
-        self.assertEqual(blocker['missing_latency_count'],0)
-        self.assertEqual(blocker['missing_energy_count'],8)
+        self.assertEqual(partition(d)['status'],'offline_partition_complete')
 
     def test_weighted_sum_not_median_ratio(self):
         windows=[]

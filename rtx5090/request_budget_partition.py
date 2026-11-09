@@ -51,7 +51,15 @@ def select(nodes, table, deadline, switch_s, switch_energy, initial, max_states=
 
 def plan(data):
     # Existing parser checks graph/table/switch completeness. Do not invent labels.
-    validation = partition(data)
+    # Historical alternative selector only. Energy is its input, not Algorithm 1's.
+    validation = partition(data,choices={n:2527 for n in data['nodes']})
+    missing_energy=[]
+    for n in data['nodes']:
+        for f in ('2250','2527'):
+            row=data['candidates'][n][f]
+            if row is None or row.get('pair_energy_j') is None:missing_energy.append(n+':'+f)
+            else:number(row['pair_energy_j'],'energy',True)
+    if missing_energy:validation['blockers'].append(dict(reason='missing_selector_energy',count=len(missing_energy)))
     result = dict(schema='request-budget-partition-v1', deployable=False, clock_writes=False,
                   selector='Pareto_DP_port_choice_not_specified_in_paper',
                   status='blocked_missing_inputs', blockers=list(validation['blockers']))
@@ -81,7 +89,8 @@ def plan(data):
     merged = partition(data, choices=chosen['choices'])
     transitions = merged['transition_count'] + (merged['blocks'][0]['triplet'][0] != data['initial_mhz'])
     total = fixed + merged['compute_s'] + transitions * data['switch_s']
-    energy = merged['total_model_energy_j'] + transitions * switch_energy
+    energy = sum(data['candidates'][n][str(b['triplet'][0])]['pair_energy_j']
+                 for b in merged['blocks'] for n in b['nodes']) + transitions * switch_energy
     result.update(partition=merged, modeled_request_s=total, modeled_energy_j=energy,
                   switches_including_initial=transitions,
                   request_budget_met=total <= deadline,

@@ -122,7 +122,7 @@ def run(a):
         lines.append('%s requested MHz: latency change %.2f%%, energy change %.2f%%, <=5%%: %s' %
             (r['requested_setting_mhz'],r['latency_change']*100,r['energy_change']*100,r['latency_within_5_percent']))
     lines += ['Real module partition: '+blocked['status'],
-              'Missing: per-unit two-frequency latency/energy + measured switching bound.',
+            'Required by partition: upstream frequency predictions, block-time predictions and switching time; no energy labels.',
               'Algorithm 1 software example: %s blocks, Eq3 all passed=%s, tail short=%s' %
               (len(software['blocks']),software['eq3_all_blocks_passed'],software['tail_short_or_equal']),
               'No executable hardware plan emitted. Existing models and original evidence unchanged.']
