@@ -160,3 +160,18 @@ schema and exact supplied metadata are required. The caller must derive metadata
 actual operands and independently establish calibration input provenance, kernel/cache
 matching, timing, V/f/T coverage and energy-window scope. Sample IDs alone do not prove
 independence. No service RPC or collection command is enabled by this adapter.
+
+
+## Resident independent primitive collection v1
+
+`eager observe --independent-primitives --apply` arms the next request; CUDA work runs
+in the model thread before its first prefill, never in the RPC thread. A normal worker
+restart is necessary to load this capability. No clock setter or bridge is used.
+Fresh seeded BF16 tensors, train square dimensions 256/512 and held-out 384/640,
+exercise aten linear/add/mul in the existing context with bounded scratch memory.
+Actual tensor metadata binds the prepared call; no model tensor or weight is reused.
+Three warmups and three 32-call event batches are retained, including host launch gaps.
+These port-choice shapes do not certify the real MLP kernel family or cache state.
+No tiny-copy overhead estimate, automatic fit, Eq2 energy label or formal parameter
+certificate is produced. CUDA failures propagate with a saved partial report; low-memory
+prechecks reject before allocation. Target CUDA execution remains pending.

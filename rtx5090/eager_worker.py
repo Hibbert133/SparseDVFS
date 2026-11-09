@@ -73,6 +73,9 @@ class EagerWorker(ObservationWorker):
             resolved_weight_loader='auto_actual_loader_class_not_observed')
         value['matrix_replay_version'] = 2
         value['operator_cost_version'] = 1
+        value['independent_primitives_version'] = 1
+        value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
+            ('worker_primitives.py', 'stateless_calibration_adapter.py')}
         # The two-rank check is performed by the client after BOTH files exist.
         if not value['compilation_disabled'] or not value['graphs_disabled']:
             raise RuntimeError('Eager did not disable compile/graphs in actual worker config')
@@ -90,7 +93,7 @@ class EagerWorker(ObservationWorker):
                 raise RuntimeError('Configure only between complete requests')
             if command['op'] != 'arm': raise ValueError('Unknown eager RPC operation')
             mode = command['mode']
-            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost'): raise ValueError('Unsupported mode')
+            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives'): raise ValueError('Unsupported mode')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':
                 core.validate_plan(command['plan'], command['fingerprint'])
@@ -181,6 +184,9 @@ class EagerWorker(ObservationWorker):
                 new = next(r for r in scheduler_output.scheduled_new_reqs if r.req_id == context['request_id'])
                 if digest(list(new.prompt_token_ids)) != self._eg_config['prompt_hash']:
                     raise RuntimeError('An unrelated request arrived while experiment was armed')
+            if self._eg_mode == 'independent_primitives' and context['step'] == 0:
+                from .worker_primitives import collect
+                collect(torch, int(self.rank), self._eg_identity, self._eg_config['out'])
             self._eg_key = core.context_key(context)
             self._eg_order, self._eg_open = [], None
             if self._eg_mode == 'operator_cost':

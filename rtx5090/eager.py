@@ -226,6 +226,11 @@ async def observe(args):
     calibrate = getattr(args, 'matrix_calibrate', False)
     replay = getattr(args, 'matrix_replay', False) or calibrate
     operator_cost = getattr(args, 'operator_cost', False)
+    primitives = getattr(args, 'independent_primitives', False)
+    if primitives and not getattr(args, 'apply', False):
+        raise ValueError('Independent calibration requires explicit --apply (no clock writes)')
+    if primitives and any(r.get('independent_primitives_version', 0) < 1 for r in identity['ranks']):
+        raise ValueError('Resident workers lack independent_primitives_version=1; normal restart required')
     if operator_cost and any(r.get('operator_cost_version', 0) < 1 for r in identity['ranks']):
         raise ValueError('Resident workers lack operator_cost_version=1; normal restart required, no writes')
     version = 2 if calibrate else 1
@@ -241,10 +246,16 @@ async def observe(args):
             result['client_provenance'] = dict(commit=git('rev-parse', 'HEAD'),
                 eager_sha256=client_api.sha(__file__), service_client_sha256=client_api.sha(client_api.__file__))
             write_new(out/'request.json', request)
-            rank_commands(identity, dict(op='arm', mode='operator_cost' if operator_cost else 'matrix_calibrate' if calibrate else 'matrix_replay' if replay else 'observe' if args.trace else 'units',
+            rank_commands(identity, dict(op='arm', mode='independent_primitives' if primitives else 'operator_cost' if operator_cost else 'matrix_calibrate' if calibrate else 'matrix_replay' if replay else 'observe' if args.trace else 'units',
                 out=str(out), request_id=request['request_id'], prompt_hash=request['prompt_hash']))
             result['reply'] = await client.run(request)
             result['coverage'] = coverage(out, identity)
+            if primitives:
+                reports=[read(out/f'rank-{r}-independent-primitives.json') for r in (0,1)]
+                for r,report in enumerate(reports):
+                    if report['rank']!=r or report['uuid']!=GPU_UUIDS[r] or report['identity_sha256']!=digest(identity['ranks'][r]) or report['status']!='independent_primitive_labels_collected_not_parameters_validated':
+                        raise ValueError('Independent primitive collection identity/status mismatch')
+                result['independent_primitives']=reports
             if replay:
                 from .eager_matrix_replay import validate_rows
                 result['matrix_replay'] = []
@@ -577,6 +588,8 @@ def parser():
         if name == 'observe':
             mode = cmd.add_mutually_exclusive_group()
             mode.add_argument('--trace', action='store_true')
+            mode.add_argument('--independent-primitives', action='store_true')
+            cmd.add_argument('--apply', action='store_true', help='Explicit calibration consent; observe does not write clocks')
             mode.add_argument('--matrix-replay', action='store_true',
                               help='Requires newly loaded workers; repeats real MLP tensors without copying weights')
             mode.add_argument('--matrix-calibrate', action='store_true',
