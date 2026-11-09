@@ -7,6 +7,7 @@ from .observe_core import GPU_UUIDS,digest
 from .service_core import read,write_new
 from .operator_equations import audit
 from .eager_matrix_replay import case_spec
+from .operator_memory_work import memory_work
 
 
 def normalize(value, root=True):
@@ -167,13 +168,14 @@ def build(inventories,linear=None):
             if priority(node['layer'])<priority(task['representative_layer']):
                 task.update(representative=node['id'],representative_context=node['context'],
                             representative_parent=node['parent_label'],representative_layer=node['layer'])
-            work=linear_work(meta) or elementwise_work(meta)
-            if work is None:task['static_work_definitions_missing']+=1
+            work=linear_work(meta) or elementwise_work(meta) or memory_work(meta,node['kernels'])
+            if work is None or work['work_flop'] is None:task['static_work_definitions_missing']+=1
             row=dict(rank=rank,uuid=GPU_UUIDS[rank],signature_id=node['signature_id'],family_id=family_id,
                 work_flop=work['work_flop'] if work else None,data_byte=work['data_byte'] if work else None,
                 workload_provenance=(inv.get('source_sha256') or digest(inv)) if work else None,
                 data_semantics='logical_tensor_bytes_not_measured_DRAM' if work else None,s_comp=0,s_mem=0,
-                workload_derivation=('linear_2MNK_v1' if meta.get('overload')=='aten.linear.default' else 'floating_binary_broadcast_v1') if work else None)
+                workload_derivation=work.get('derivation', 'linear_2MNK_v1' if meta.get('overload')=='aten.linear.default' else 'floating_binary_broadcast_v1') if work else None,
+                unresolved_workload=work.get('unresolved',[]) if work else ['workload_definition'])
             source_rows[(rank,node['id'])]=row
             if linear and work:
                 try:
@@ -221,7 +223,10 @@ def build(inventories,linear=None):
         family_class_counts=dict(Counter(t['work_class'] for t in tasks.values())),
         static_work_coverage=dict(rank_occurrences=len(source_rows),
             derived=sum(r['work_flop'] is not None for r in source_rows.values()),
-            missing=sum(r['work_flop'] is None for r in source_rows.values())),
+            missing=sum(r['work_flop'] is None for r in source_rows.values()),
+            logical_bytes_known=sum(r['data_byte'] is not None for r in source_rows.values()),
+            bytes_only=sum(r['data_byte'] is not None and r['work_flop'] is None for r in source_rows.values())),
+        workload_derivation_counts=dict(Counter(r['workload_derivation'] or 'unresolved' for r in source_rows.values())),
         linear_diagnostic_matches=len(prior_matches),linear_matches=prior_matches,
         linear_source_sha256=digest(linear) if linear else None,
         tasks=list(tasks.values()),missing_evidence_counts=dict(Counter(x['reason'] for x in audit(bundle))),
@@ -244,6 +249,7 @@ def main():
         f"recognized embedding shard pairs: {len(report['recognized_embedding_shards'])} (structural only; graph join unverified)",
         'Static workload coverage: '+str(report['static_work_coverage']),
         'Family classes: '+str(report['family_class_counts']),
+        'Workload derivations: '+str(report['workload_derivation_counts']),
         'Missing (occurrence/family/shared counts, not collection jobs): '+str(report['missing_evidence_counts']),
         'No service access, restart, new sampling or clock writes.']
     for item in report['rank_mismatch_details'][:10]:

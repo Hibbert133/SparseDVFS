@@ -56,6 +56,7 @@ def audit(bundle):
             if row['uuid']!=GPU_UUIDS[row['rank']]:raise ValueError('Rank/UUID mismatch')
             need(bool(row.get('workload_provenance')),'workload_definition_missing',where)
             need(bool(row.get('data_semantics')),'data_semantics_missing',where)
+            need(not row.get('unresolved_workload'),'workload_compute_path_unresolved',where)
             for field in ('work_flop','data_byte'):
                 value=row.get(field)
                 need(type(value) in (float,int) and math.isfinite(value) and value>=0,'missing_'+field,where)

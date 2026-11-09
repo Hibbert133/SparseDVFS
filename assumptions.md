@@ -136,3 +136,16 @@ all other normalized fields match, tensor shapes/types and shard capacity pass c
 This conservative adapter is a port choice, not a SparseDVFS paper rule. Nonempty added vocabulary remains unsupported.
 Original differences and signature hashes are retained. No token-content, collective, current-service identity,
 full vocabulary coverage, kernel equivalence, graph join or model parameter certification follows from this check.
+
+
+## 2026-11-09: bounded copy/conversion workload definitions
+
+Port choice: only nonempty, contiguous strided, equal-shape same-device CUDA tensors
+with associated GPU kernels enter the copy/conversion traffic adapter. Same-dtype copy
+has zero floating arithmetic and logical bytes equal to source plus destination sizes.
+This does not certify non-aliasing, actual DRAM traffic, copy bandwidth or power; existing
+same-path and independent calibration gates remain required. Broadcast, cross-device,
+unsupported dtype and no-kernel cases remain unresolved.
+Dtype conversion records logical bytes only, with work_flop=null and explicit unresolved
+conversion_compute_path. It cannot enter Eq1 prediction until its compute path is modeled
+and validated; casting is not silently assigned a zero-cost compute branch.
