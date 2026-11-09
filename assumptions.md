@@ -149,3 +149,14 @@ unsupported dtype and no-kernel cases remain unresolved.
 Dtype conversion records logical bytes only, with work_flop=null and explicit unresolved
 conversion_compute_path. It cannot enter Eq1 prediction until its compute path is modeled
 and validated; casting is not silently assigned a zero-cost compute branch.
+
+
+## Stateless calibration adapter boundary
+
+`stateless_calibration_adapter.prepare/invoke` is worker integration groundwork, not
+a connected collector. Only bias-free supported linear and supported floating binary
+operations are admitted. Training and holdout IDs are disjoint; a read-only dispatcher
+schema and exact supplied metadata are required. The caller must derive metadata from
+actual operands and independently establish calibration input provenance, kernel/cache
+matching, timing, V/f/T coverage and energy-window scope. Sample IDs alone do not prove
+independence. No service RPC or collection command is enabled by this adapter.
