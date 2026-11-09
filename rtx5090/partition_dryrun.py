@@ -8,7 +8,7 @@ from .service_core import read, write_new, positive
 from .observe_core import digest
 
 
-def partition(data):
+def partition(data, choices=None):
     if data.get('schema')!='pair-partition-input-v1': raise ValueError('Wrong dry-run schema')
     nodes=data['nodes']
     graph=OrderedDAG(tuple(nodes),tuple(tuple(e) for e in data['edges'])).validate()
@@ -20,7 +20,8 @@ def partition(data):
         if set(table[node])!={str(f) for f in rates}: raise ValueError('Missing/extra frequency candidates')
         for f in rates:
             row=table[node][str(f)]
-            if row is None: missing.append(node+':'+str(f)); continue
+            if row is None or row.get('pair_latency_s') is None or row.get('pair_energy_j') is None:
+                missing.append(node+':'+str(f)); continue
             positive(row['pair_latency_s'],'paired latency')
             positive(row['pair_energy_j'],'paired energy')
     result=dict(schema='pair-partition-dryrun-v1',input_sha256=digest(data),
@@ -34,9 +35,16 @@ def partition(data):
     else: positive(switch,'switch bound')
     if result['blockers']:
         result['status']='blocked_missing_inputs'; return result
-    for node in nodes:
-        feasible=[f for f in rates if table[node][str(f)]['pair_latency_s']<=1.05*table[node]['2527']['pair_latency_s']]
-        result['choices'][node]=min(feasible,key=lambda f:(table[node][str(f)]['pair_energy_j'],table[node][str(f)]['pair_latency_s'],f))
+    if choices is not None:
+        if set(choices) != set(nodes) or any(type(f) is not int or f not in rates for f in choices.values()):
+            raise ValueError('Explicit selection does not cover all nodes/rates')
+        result['choices'] = dict(choices)
+        result['selection_source'] = 'explicit_request_budget_selector'
+    else:
+        result['selection_source'] = 'legacy_per_unit_5pct_screen_not_request_budget'
+        for node in nodes:
+            feasible=[f for f in rates if table[node][str(f)]['pair_latency_s']<=1.05*table[node]['2527']['pair_latency_s']]
+            result['choices'][node]=min(feasible,key=lambda f:(table[node][str(f)]['pair_energy_j'],table[node][str(f)]['pair_latency_s'],f))
     def duration(members,frequency):
         return sum(table[n][str(frequency.values[0])]['pair_latency_s'] for n in members)
     blocks,decisions=greedy_partition(graph,lambda n:(result['choices'][n],)*2,duration,

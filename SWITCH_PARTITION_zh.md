@@ -52,3 +52,29 @@ capture/service 身份绑定及缺失成本。软件 SQLite fixture 测试不代
 范围仍仅第一处MLP的prefill/decode gate_up/down linear；不是完整64层成本。
 kernel匹配和缓存状态不会因运行此命令而变成已通过。遥测只描述当时的频率/温度等上下文，
 不输出算子能量，不把插桩请求耗时作为正式服务基线。
+
+## 全模块延迟与请求级预算（2026-11-09）
+
+同一采集器新增 `--scope modules`，复用已常驻的 `units` worker 模式，无需服务重启。
+每卡保存 68 个模块 × 64 个上下文（prefill + 63 decode）的 CUDA current-stream Event
+诊断，共 8704 个 rank/context/unit 案例。零时长保留并标为未解析，缺失、重复、身份不符
+拒绝；三个请求的原始时长均保留。没有 CUPTI kernel capture，也不将 Event 和同流结束
+自动等同于所有 NCCL/custom stream 已完成。完整执行成本仍需后续核实。
+
+`module-budget-input.json` 填入两频点各 rank 的模块事件中位数及其最大值投影；
+`pair_energy_j`、`switch_s`、请求预算等缺项保留为空。该文件可直接传给新的
+`python -m rtx5090.request_budget_partition --input ... --out ...`，得到明确缺项报告。
+禁止用请求窗口功耗乘模块耗时冒充算子能量。
+
+新预算入口不要求每个算子减速都不超过5%；它接受完整 `request_budget`：
+`reference_s`、`max_increase`、`fixed_overhead_s`，并要求显式 `initial_mhz` 和
+`switch_energy_j`。先对整个有序序列执行以最后频点区分的时间/能量 Pareto DP，
+计入初始和内部换频；然后调用原 Algorithm 1 的 OR/max/末尾追加逻辑，重新计算合并后
+的时间、能量和严格 Eq.(3)。合并后超预算会明确失败，不声称合并后能量最优。
+未合并加性表下的DP最优性不等于完整请求最优性；固定开销应包含表外调度、协调和最终
+恢复等适用成本。状态数超过上限直接停止，不静默剪枝或输出近似计划。
+
+DP、配对最大时间投影和5%预算是移植侧显式选择，不是原论文指定的选频优化器。
+旧 `partition_dryrun` 默认每单元5%筛选仍作为历史软件示例保留，标注 legacy，
+新入口使用显式请求预算选择结果绕过此限制。既有真实部署接口的门槛未放宽；新入口
+始终 `deployable:false`，不提供硬件授权。

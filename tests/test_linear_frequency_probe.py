@@ -1,10 +1,14 @@
 import asyncio
 import copy
 import unittest
+import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
-from rtx5090.linear_frequency_probe import summarize, compare, transaction
-from rtx5090.observe_core import GPU_UUIDS
+from rtx5090.linear_frequency_probe import summarize, summarize_units, compare, transaction
+from rtx5090.observe_core import GPU_UUIDS, digest
+from rtx5090.eager_core import UNITS
 
 
 def observation():
@@ -20,6 +24,23 @@ def observation():
 
 
 class ProbeTests(unittest.TestCase):
+    def test_full_module_contexts_and_zero_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            identity=dict(fingerprint='same',ranks=[dict(rank=0),dict(rank=1)])
+            rows=[dict(context=c,unit=u,stream_event_ms=0 if u=='sample' else .1)
+                  for c in ['prefill']+['decode.%d'%i for i in range(63)] for u in UNITS]
+            for rank in (0,1):
+                Path(tmp,'rank-%d-execution.json'%rank).write_text(json.dumps(dict(
+                    status='complete',mode='units',rank=rank,
+                    identity_sha256=digest(identity['ranks'][rank]),rows=rows)))
+            values=summarize_units(observation(),identity,tmp)
+            self.assertEqual(len(values),2*64*len(UNITS))
+            self.assertTrue(values['0:prefill/sample']['zero_duration_unresolved'])
+            path=Path(tmp,'rank-1-execution.json')
+            broken=json.loads(path.read_text());broken['rows'].pop()
+            path.write_text(json.dumps(broken))
+            with self.assertRaises(ValueError): summarize_units(observation(),identity,tmp)
+
     def test_full_dual_rank_summary_and_comparison(self):
         operators = summarize(observation(), 'same')
         self.assertEqual(len(operators), 8)

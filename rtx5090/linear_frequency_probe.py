@@ -15,6 +15,44 @@ from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
 
 
+def summarize_units(observation, identity, directory):
+    from .eager_core import UNITS
+    if (observation.get('status') != 'complete' or
+            observation['identity_fingerprint'] != identity['fingerprint'] or
+            not observation['coverage']['passed'] or
+            not observation['cache_isolation'].get('miss_verified')):
+        raise ValueError('Incomplete module coverage or identity/cache mismatch')
+    usage = observation['reply']['usage']
+    if usage.get('prompt_tokens') != 512 or usage.get('completion_tokens') != 64:
+        raise ValueError('Require actual 512/64')
+    contexts = ['prefill'] + ['decode.%d' % i for i in range(63)]
+    expected = {(c, u) for c in contexts for u in UNITS}
+    result = {}
+    for rank in (0, 1):
+        execution = read(Path(directory)/('rank-%d-execution.json' % rank))
+        if (execution['status'] != 'complete' or execution['mode'] != 'units' or
+                execution['rank'] != rank or execution['identity_sha256'] != digest(identity['ranks'][rank])):
+            raise ValueError('Module execution identity mismatch')
+        seen = set()
+        for row in execution['rows']:
+            pair = (row['context'], row['unit'])
+            if pair in seen or pair not in expected:
+                raise ValueError('Duplicate/unknown module context')
+            seen.add(pair)
+            value = row['stream_event_ms'] / 1000
+            if not math.isfinite(value) or value < 0:
+                raise ValueError('Invalid CUDA event duration')
+            key = '%s:%s/%s' % (rank, pair[0], pair[1])
+            result[key] = dict(uuid=GPU_UUIDS[rank], parent=row['unit'], shape=None,
+                               batch_means_s=[value], median_s=value,
+                               kernel_names_verified=False,
+                               timing_scope='current_stream_module_events_not_all_stream_critical_path',
+                               zero_duration_unresolved=value == 0)
+        if seen != expected:
+            raise ValueError('Missing module contexts')
+    return result
+
+
 def summarize(observation, identity):
     if observation.get('status') != 'complete' or observation['identity_fingerprint'] != identity:
         raise ValueError('Incomplete or changed worker observation')
@@ -63,7 +101,8 @@ def compare(windows):
             values = [w['operators'][key]['median_s'] for w in selected]
             cells[str(rate)] = dict(request_medians_s=values, median_s=median(values))
         output.append(dict(key=key, settings=cells,
-                           latency_ratio_2250_over_2527=cells['2250']['median_s']/cells['2527']['median_s']))
+                           latency_ratio_2250_over_2527=(cells['2250']['median_s']/cells['2527']['median_s']
+                               if cells['2527']['median_s'] > 0 else None)))
     return output
 
 
@@ -74,6 +113,28 @@ async def transaction(controller, work, restore):
         if controller.restore_result['required']:
             # Physical restoration must be attempted even after observation failure.
             await restore()
+
+
+def module_input(result):
+    from .eager_core import UNITS
+    contexts = ['prefill'] + ['decode.%d' % i for i in range(63)]
+    nodes = [c+'/'+u for c in contexts for u in UNITS]
+    lookup = {row['key']: row for row in result['comparison']}
+    table = {}
+    for node in nodes:
+        table[node] = {}
+        for rate in ('2250', '2527'):
+            times = [lookup['%d:%s' % (rank, node)]['settings'][rate]['median_s'] for rank in (0, 1)]
+            table[node][rate] = dict(pair_latency_s=max(times) if all(t>0 for t in times) else None,
+                                    pair_energy_j=None, rank_event_medians_s=times,
+                                    timing_scope='max_rank_module_event_diagnostic_not_block_prediction')
+    return dict(schema='pair-partition-input-v1', synthetic=False,
+                identity_fingerprint=result['identity_fingerprint'],
+                scope='full_request_ordered_module_projection_not_kernel_DAG',
+                nodes=nodes, edges=list(zip(nodes, nodes[1:])), candidates=table,
+                switch_s=None, request_budget=None, initial_mhz=None,
+                costs_validated=False, deployable=False,
+                note='Energy, request overhead/reference and certified switching missing; do not fill from window energy allocation')
 
 
 async def collect(a, identity, devices, out, result):
@@ -97,7 +158,7 @@ async def collect(a, identity, devices, out, result):
                             observation = await eager.observe(SimpleNamespace(
                                 identity=str(out/'identity.json'), out=str(out/tag),
                                 seed=a.seed+10000+repeat*10+(rate==2527),
-                                matrix_replay=True, matrix_calibrate=False, trace=False))
+                                matrix_replay=a.scope == 'linear', matrix_calibrate=False, trace=False))
                         finally:
                             await asyncio.to_thread(sampler.finish)
                             write_new(out/(tag+'-telemetry.json'), dict(frames=sampler.frames, errors=sampler.errors))
@@ -114,7 +175,8 @@ async def collect(a, identity, devices, out, result):
                         window = dict(requested_mhz=rate, repeat=repeat, actual_readbacks=actual,
                                       observation_sha256=digest(observation),
                                       prompt_hash=observation['reply']['prompt_hash'],
-                                      operators=summarize(observation, identity['fingerprint']))
+                                      operators=(summarize(observation, identity['fingerprint']) if a.scope == 'linear'
+                                                 else summarize_units(observation, identity, out/tag)))
                         result['windows'].append(window)
                         write_new(out/(tag+'-summary.json'), window)
                         service.emit(dict(window=tag, status='timing_diagnostic_saved', actual_readbacks=actual))
@@ -134,7 +196,7 @@ async def collect(a, identity, devices, out, result):
             await transaction(controller, work, restore)
             if result.get('disarm_error'):
                 raise RuntimeError('Worker disarm not confirmed')
-            result['status'] = 'two_setting_linear_timing_complete'
+            result['status'] = 'two_setting_%s_timing_complete' % a.scope
     finally:
         if controller.dirty:
             try:
@@ -150,6 +212,7 @@ def main():
         p.add_argument('--'+name, required=True)
     p.add_argument('--base-url', default=service_client.BASE_URL)
     p.add_argument('--seed', type=int, default=16000100)
+    p.add_argument('--scope', choices=('linear', 'modules'), default='linear')
     p.add_argument('--apply', action='store_true')
     p.add_argument('--ack-default-auto', action='store_true')
     a = p.parse_args()
@@ -161,7 +224,7 @@ def main():
     with (Path(launch['runtime'])/'client.lock').open('a') as lease:
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
         identity = eager.inspect(a.run, a.base_url)
-        if any(rank.get('matrix_replay_version', 0) < 1 for rank in identity['ranks']):
+        if a.scope == 'linear' and any(rank.get('matrix_replay_version', 0) < 1 for rank in identity['ranks']):
             raise ValueError('Resident workers do not support matrix replay; no writes')
         config = read(a.telemetry)
         if any(c['backend'] != 'bridge' for c in config):
@@ -171,7 +234,8 @@ def main():
         result = dict(status='failed', identity_fingerprint=identity['fingerprint'], windows=[],
                       clock_writes=False, exact_lock_verified=False, deployable=False,
                       energy_measured=False, frequency_scaling_validated=False,
-                      scope='first_MLP_projection_per_phase_repeated_linear_timing_not_whole_blocks',
+                      scope=('first_MLP_projection_per_phase_repeated_linear_timing_not_whole_blocks' if a.scope == 'linear'
+                             else 'full_module_current_stream_event_diagnostics_not_whole_block_critical_path'),
                       telemetry_config_sha256=digest(config), commit=eager.git('rev-parse','HEAD'))
         devices = []
         def stop(signum, frame):
@@ -196,7 +260,21 @@ def main():
                     result['status'] = 'failed'
             write_new(out/'collection.json', result)
         lines = [result['status'], 'Two requested settings; actual readbacks retained. No operator energy or block plan.']
-        for row in result.get('comparison', []):
+        comparisons = result.get('comparison', [])
+        if a.scope == 'modules':
+            if result['status'] == 'two_setting_modules_timing_complete':
+                write_new(out/'module-budget-input.json', module_input(result))
+                lines.append('module-budget-input.json contains measured event diagnostics and explicit missing energy/budget fields.')
+            lines.append('Full per-context table saved in collection.json: %d cases' % len(comparisons))
+            for rank in (0, 1):
+                for phase in ('prefill', 'decode'):
+                    values = [v['latency_ratio_2250_over_2527'] for v in comparisons
+                              if v['key'].startswith('%d:%s' % (rank, phase))]
+                    usable = sorted(v for v in values if v is not None)
+                    lines.append('rank %d %s: cases=%d zero-high-unresolved=%d median ratio=%s (unweighted diagnostic)' % (
+                        rank, phase, len(values), len(values)-len(usable), median(usable) if usable else None))
+            comparisons = []
+        for row in comparisons:
             lines.append('%s | 2250 %.3f us | 2527 %.3f us | ratio %.4f' % (
                 row['key'], row['settings']['2250']['median_s']*1e6,
                 row['settings']['2527']['median_s']*1e6, row['latency_ratio_2250_over_2527']))
