@@ -19,6 +19,7 @@ from .eager_ipc import LocalServer, Rendezvous
 from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
 from .resource_worker import FAMILIES, window_seconds
+from .resource_frequencies import resolve_rates,holdout_rates
 
 
 class HostWindow:
@@ -144,6 +145,7 @@ def main():
     p.add_argument('--windows-python',default='/mnt/c/ProgramData/Anaconda3/python.exe')
     p.add_argument('--families',nargs='+',choices=FAMILIES,default=['linear','add','mul','copy'])
     p.add_argument('--model');p.add_argument('--seed',type=int,default=211100)
+    p.add_argument('--rates',type=int,nargs='+',help='Requested MHz; nearest common candidate within 15 MHz only')
     p.add_argument('--window-seconds',type=float,default=30)
     p.add_argument('--apply',action='store_true');p.add_argument('--ack-default-auto',action='store_true')
     a=p.parse_args()
@@ -178,16 +180,16 @@ def main():
                 except subprocess.TimeoutExpired:metrics['status']='query_timeout'
             write_new(out/'counter-capability.json',metrics)
             common=set(probes[0]['rates_mhz'])&set(probes[1]['rates_mhz'])
-            if not {2250,2527}<=common:raise ValueError('Training settings unavailable')
-            inside=[f for f in common if 2250<f<2527]
-            if not inside:raise ValueError('No intermediate holdout frequency')
-            middle=min(inside,key=lambda f:(abs(f-2388.5),f));result['holdout_requested_mhz']=middle
+            rates,mapping=resolve_rates(a.rates or ([2385] if a.command=='holdout' else [2250,2527]),common)
+            result['requested_to_supported_mhz']=mapping
+            result['control_settings_mhz']=rates
             if a.model:
                 model=read(a.model)
                 if model['identity_fingerprint']!=identity['fingerprint']:raise ValueError('Frozen model identity changed')
                 result['frozen_model_sha256']=digest(model)
+                if a.command=='holdout':holdout_rates(rates,model.get('training_requested_mhz',[2250,2527]))
             for repeat in range(3):
-                for rate in ([middle] if a.command=='holdout' else [2250,2527] if repeat%2==0 else [2527,2250]):
+                for rate in (rates if repeat%2==0 else list(reversed(rates))):
                     for family in a.families:
                         for size in ([384] if a.command=='holdout' else [256,512]):
                             result['protocol'].append(dict(requested_mhz=rate,case=dict(family=family,size=size,

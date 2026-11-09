@@ -105,6 +105,7 @@ def fit(rows):
     check_rows(rows)
     if len({r['identity_fingerprint'] for r in rows})!=1:raise ValueError('Mixed service identity')
     result=dict(schema='resource-model-v1',training_ids=ids,training_sha256=digest(rows),
+        training_requested_mhz=sorted({r['requested_mhz'] for r in rows}),
         identity_fingerprint=rows[0]['identity_fingerprint'],models={},deployable=False,
         scope='independent_primitives_conditional_board_power_not_Qwen_operator_certificate')
     joint={}
@@ -128,7 +129,7 @@ def fit(rows):
         if any(r['data_semantics']!='logical_tensor_bytes' for r in group):raise ValueError('Mixed byte semantics')
         if len({r['memory_mhz'] for r in group})!=1:raise ValueError('Memory frequency changed')
         rates=sorted({r['requested_mhz'] for r in group})
-        if rates!=[2250,2527]:raise ValueError('Require both prescribed training settings')
+        if len(rates)<2 or rates!=result['training_requested_mhz']:raise ValueError('Each resource requires the complete multi-frequency training grid')
         families,regression=joint[rank]
         power=dict(regression)
         if power['status']=='candidate':
@@ -153,6 +154,8 @@ def validate(model, rows):
     if len(set(ids))!=len(ids) or set(ids)&set(model['training_ids']):raise ValueError('Repeated holdout IDs')
     check_rows(rows)
     groups={}; missing=[]
+    if any(r['requested_mhz'] in model.get('training_requested_mhz',[2250,2527]) for r in rows):
+        raise ValueError('Require unseen intermediate frequency')
     for r in rows:
         if r['identity_fingerprint']!=model['identity_fingerprint']:raise ValueError('Identity changed')
         key=f"{r['rank']}:{r['family']}"; m=model['models'].get(key)
@@ -163,21 +166,28 @@ def validate(model, rows):
         if any(not m[k+'_range_'+unit][0]<=r[k+'_'+unit]<=m[k+'_range_'+unit][1]
                for k,unit in [('voltage','v'),('temperature','c')]):
             missing.append(r['id']);continue
-        if r['requested_mhz'] in (2250,2527):raise ValueError('Require unseen intermediate frequency')
+        if r['requested_mhz'] in model.get('training_requested_mhz',[2250,2527]):raise ValueError('Require unseen intermediate frequency')
         if str(r['shape']) in m['training_shapes']:raise ValueError('Holdout repeats training shape')
         t=m['latency']; duration=t['overhead_s']+max(t['a_s_cycles_per_flop']*r['work_flop']/r['frequency_hz'],t['b_s_per_byte']*r['data_byte'])
         # Conditional on observed feature trajectory; NEVER prospective operator energy.
         energy=float(np.dot(m['power']['coefficients'],r['integral_basis']))
         if energy<=0:missing.append(r['id']);continue
-        groups.setdefault(key,[]).append(dict(id=r['id'],predicted_latency_s=duration,
+        groups.setdefault(key,[]).append(dict(id=r['id'],requested_mhz=r['requested_mhz'],predicted_latency_s=duration,
             observed_latency_s=r['latency_s'],predicted_energy_j=energy,observed_energy_j=r['energy_j']))
     scores={k:{field:errors([r['observed_'+field] for r in g],[r['predicted_'+field] for r in g])
                for field in ('latency_s','energy_j')} for k,g in groups.items()}
+    per_frequency={}
+    for key,group in groups.items():
+        for rate in sorted({r['requested_mhz'] for r in group}):
+            subset=[r for r in group if r['requested_mhz']==rate]
+            per_frequency[f'{key}:{rate}']={field:errors([r['observed_'+field] for r in subset],
+                [r['predicted_'+field] for r in subset]) for field in ('latency_s','energy_j')}
     return dict(status='conditional_validation_complete',model_sha256=digest(model),rows=groups,scores=scores,
+        scores_by_frequency=per_frequency,
         unresolved_rows=missing,parameter_blockers={k:m['latency']['blockers']+m['power']['blockers'] for k,m in model['models'].items()},
         parameters_updated=False,parameters_validated=False,deployable=False,
         conditional_on_measured_holdout_V_f_T=True,
-        numeric_limits_passed=not missing and bool(scores) and all(s['wape']<=.1 and s['p90_relative_error']<=.2 for g in scores.values() for s in g.values()))
+        numeric_limits_passed=not missing and bool(scores) and all(s['wape']<=.1 and s['p90_relative_error']<=.2 for g in per_frequency.values() for s in g.values()))
 
 
 def select_budget(candidates, budget_s):
@@ -191,9 +201,15 @@ def select_budget(candidates, budget_s):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['fit','validate'])
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['merge','fit','validate'])
     p.add_argument('--input',required=True);p.add_argument('--model');p.add_argument('--out',required=True)
+    p.add_argument('--extra',nargs='+')
     a=p.parse_args();data=read(a.input)
+    if a.command=='merge':
+        if not a.extra:p.error('--extra required for merge')
+        from .resource_frequencies import merge_training
+        result=merge_training([data]+[read(path) for path in a.extra])
+        write_new(Path(a.out),result);print('Merged training settings:',result['training_requested_mhz']);return
     if data.get('status')!='resource_collection_complete':raise ValueError('Complete collection required; no partial fitting')
     if data.get('collection_role')=='pilot':raise ValueError('Pilot excluded from fitting and validation')
     if a.command=='validate' and not a.model:p.error('--model required for validate')
