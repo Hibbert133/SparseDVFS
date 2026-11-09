@@ -1,0 +1,158 @@
+{
+  "schema": "pair-partition-dryrun-v1",
+  "input_sha256": "5bf891ed993a808f687a8e5fa68670294aa273c6171279f7bf0d5d390214e583",
+  "synthetic": true,
+  "scope": "synthetic_software_fixture",
+  "deployable": false,
+  "clock_writes": false,
+  "N": 5,
+  "similarity": 0.05,
+  "latency_budget": 1.05,
+  "choices": {
+    "a": 2250,
+    "b": 2527,
+    "c": 2250,
+    "tail": 2527
+  },
+  "blocks": [
+    {
+      "nodes": [
+        "a",
+        "b"
+      ],
+      "triplet": [
+        2527,
+        2527
+      ],
+      "estimated_s": 0.022,
+      "amortized_strict_gt": true,
+      "boundary_sequence": 0,
+      "rank_0_nodes": [
+        "a",
+        "b"
+      ],
+      "rank_1_nodes": [
+        "a",
+        "b"
+      ],
+      "model_energy_j": 3.3
+    },
+    {
+      "nodes": [
+        "c"
+      ],
+      "triplet": [
+        2250,
+        2250
+      ],
+      "estimated_s": 0.0102,
+      "amortized_strict_gt": true,
+      "boundary_sequence": 1,
+      "rank_0_nodes": [
+        "c"
+      ],
+      "rank_1_nodes": [
+        "c"
+      ],
+      "model_energy_j": 1.0
+    },
+    {
+      "nodes": [
+        "tail"
+      ],
+      "triplet": [
+        2527,
+        2527
+      ],
+      "estimated_s": 0.001,
+      "amortized_strict_gt": false,
+      "boundary_sequence": 2,
+      "rank_0_nodes": [
+        "tail"
+      ],
+      "rank_1_nodes": [
+        "tail"
+      ],
+      "model_energy_j": 0.15
+    }
+  ],
+  "decisions": [
+    {
+      "current": [
+        "a"
+      ],
+      "next": "b",
+      "current_triplet": [
+        2250,
+        2250
+      ],
+      "next_triplet": [
+        2527,
+        2527
+      ],
+      "current_duration_s": 0.00204,
+      "threshold_s": 0.005,
+      "short": true,
+      "similar": false,
+      "merged": true
+    },
+    {
+      "current": [
+        "a",
+        "b"
+      ],
+      "next": "c",
+      "current_triplet": [
+        2527,
+        2527
+      ],
+      "next_triplet": [
+        2250,
+        2250
+      ],
+      "current_duration_s": 0.022,
+      "threshold_s": 0.005,
+      "short": false,
+      "similar": false,
+      "merged": false
+    },
+    {
+      "current": [
+        "c"
+      ],
+      "next": "tail",
+      "current_triplet": [
+        2250,
+        2250
+      ],
+      "next_triplet": [
+        2527,
+        2527
+      ],
+      "current_duration_s": 0.0102,
+      "threshold_s": 0.005,
+      "short": false,
+      "similar": false,
+      "merged": false
+    }
+  ],
+  "blockers": [],
+  "interpretation": "GPU pair projection; no CPU/EMC control, no hardware authorization",
+  "status": "offline_partition_complete",
+  "eq3_all_blocks_passed": false,
+  "tail_short_or_equal": true,
+  "total_model_energy_j": 4.45,
+  "transition_count": 2,
+  "compute_s": 0.0332,
+  "modeled_serial_latency_s": 0.0352,
+  "latency_budget_met_before_unmodeled_overheads": false,
+  "unmodeled_costs": [
+    "initial_setting",
+    "final_restore",
+    "dual_rank_coordination",
+    "readback_wait",
+    "switch_energy",
+    "HTTP_and_scheduler"
+  ],
+  "source": "literal_Algorithm1_with_separate_strict_Eq3_audit"
+}

@@ -180,6 +180,7 @@ def plan(model, validation, coverage, switching, temperature):
     result = dict(schema=core.SCHEMA, synthetic=False, identity_fingerprint=fingerprint,
         mode='serial', cpu=None, emc=None, model_validation=validation, coverage=coverage,
         model_sha256=digest(model), switching_sha256=digest(switching), contexts={},
+        partition_decisions={},eq3_by_context={},
         temperature_c=temperature, N=5, similarity=.05, latency_budget=1.05,
         scope='GPU_pair_module_chain_projection_not_full_paper_mechanisms',
         temperature_ranges={r: v['temperature_range_c'] for r, v in model['thermal'].items()},
@@ -209,5 +210,9 @@ def plan(model, validation, coverage, switching, temperature):
             switch_s, 5, frequency_factory=PairFrequency.of)
         result['contexts'][context] = [dict(units=b['nodes'], mhz=b['triplet'][0],
             estimated_s=b['estimated_s'], amortized_strict_gt=b['amortized_strict_gt']) for b in blocks]
+        result['partition_decisions'][context] = decisions
+        result['eq3_by_context'][context] = dict(all_blocks_strict_gt=all(b['amortized_strict_gt'] for b in blocks),
+            tail_short_or_equal=not blocks[-1]['amortized_strict_gt'],
+            note='Literal Algorithm1 may retain an equality boundary or short tail; flags do not certify switching amortization')
     core.validate_plan(result, fingerprint)
     return result
