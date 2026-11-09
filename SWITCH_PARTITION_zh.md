@@ -78,3 +78,12 @@ DP、配对最大时间投影和5%预算是移植侧显式选择，不是原论�
 旧 `partition_dryrun` 默认每单元5%筛选仍作为历史软件示例保留，标注 legacy，
 新入口使用显式请求预算选择结果绕过此限制。既有真实部署接口的门槛未放宽；新入口
 始终 `deployable:false`，不提供硬件授权。
+
+## 已采模块数据的加权汇总
+
+`python -m rtx5090.module_cost_audit --collection DIR --out NEW_DIR` 仅读取上述
+采集结果，按每请求先求模块 Event 时长之和、再取三个请求的中位数，输出各 rank
+的 prefill/decode 比值和主要模块事件时长占比。另列 sum(max(rank0,rank1)) 投影，
+不称为实测请求关键路径。它用于避免将未加权的单模块比值中位数解释为整个阶段减速。
+三个请求全部保留，不使用整个请求的能量来给模块分摊标签。缺项计数分别报告 latency
+和 energy；计时已存在但能量未知时，不再用笼统的 predictions missing 表述。

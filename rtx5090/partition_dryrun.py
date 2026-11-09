@@ -15,22 +15,25 @@ def partition(data, choices=None):
     table=data['candidates']
     if set(table)!=set(nodes): raise ValueError('Missing/extra node table')
     rates=(2250,2527)
-    missing=[]
+    missing=[]; missing_latency=0; missing_energy=0
     for node in nodes:
         if set(table[node])!={str(f) for f in rates}: raise ValueError('Missing/extra frequency candidates')
         for f in rates:
             row=table[node][str(f)]
-            if row is None or row.get('pair_latency_s') is None or row.get('pair_energy_j') is None:
-                missing.append(node+':'+str(f)); continue
-            positive(row['pair_latency_s'],'paired latency')
-            positive(row['pair_energy_j'],'paired energy')
+            no_latency=row is None or row.get('pair_latency_s') is None
+            no_energy=row is None or row.get('pair_energy_j') is None
+            missing_latency += no_latency; missing_energy += no_energy
+            if not no_latency: positive(row['pair_latency_s'],'paired latency')
+            if not no_energy: positive(row['pair_energy_j'],'paired energy')
+            if no_latency or no_energy: missing.append(node+':'+str(f))
     result=dict(schema='pair-partition-dryrun-v1',input_sha256=digest(data),
                 synthetic=data.get('synthetic') is True,scope=data['scope'],
                 deployable=False,clock_writes=False,N=5,similarity=.05,latency_budget=1.05,
                 choices={},blocks=[],decisions=[],blockers=[],
                 interpretation='GPU pair projection; no CPU/EMC control, no hardware authorization')
     switch=data.get('switch_s')
-    if missing: result['blockers'].append(dict(reason='missing_unit_frequency_predictions',count=len(missing),examples=missing[:8]))
+    if missing: result['blockers'].append(dict(reason='missing_unit_frequency_costs',count=len(missing),
+        missing_latency_count=missing_latency,missing_energy_count=missing_energy,examples=missing[:8]))
     if switch is None: result['blockers'].append(dict(reason='missing_measured_switch_bound'))
     else: positive(switch,'switch bound')
     if result['blockers']:
