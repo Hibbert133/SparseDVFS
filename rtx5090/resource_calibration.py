@@ -19,7 +19,7 @@ from .eager_ipc import LocalServer, Rendezvous
 from .observe_core import GPU_UUIDS, digest
 from .service_core import read, write_new
 from .resource_worker import FAMILIES, window_seconds
-from .resource_frequencies import resolve_rates,holdout_rates
+from .resource_frequencies import resolve_rates,holdout_rates,sweep_jobs,SWEEP_RATES
 
 
 class HostWindow:
@@ -105,6 +105,7 @@ async def one(identity, client, out, spec, a):
             temperature_c=statistics.mean(s['temperature_c'] for s in values),
             memory_mhz=energy['clock_ranges'][uuid]['memory_mhz'],
             integral_basis=f['integral_basis'],energy_j=energy['by_uuid'][uuid]['energy_j'],
+            host_window_s=f['duration_s'],
             energy_relative_budget=energy['by_uuid'][uuid]['relative_uncertainty'],
             feature_ranges=f['ranges'],same_path_verified=False,
             timing_frequency_simultaneously_observed=False,
@@ -139,7 +140,7 @@ async def collect(a, identity, devices, out, result):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command',choices=['check','pilot','train','holdout'])
+    p.add_argument('command',choices=['check','pilot','train','holdout','sweep'])
     for k in ('run','telemetry','out'):p.add_argument('--'+k,required=True)
     p.add_argument('--base-url',default=service_client.BASE_URL)
     p.add_argument('--windows-python',default='/mnt/c/ProgramData/Anaconda3/python.exe')
@@ -147,6 +148,7 @@ def main():
     p.add_argument('--model');p.add_argument('--seed',type=int,default=211100)
     p.add_argument('--rates',type=int,nargs='+',help='Requested MHz; nearest common candidate within 15 MHz only')
     p.add_argument('--window-seconds',type=float,default=30)
+    p.add_argument('--sweep-repeats',type=int,choices=(1,2,3),default=2)
     p.add_argument('--apply',action='store_true');p.add_argument('--ack-default-auto',action='store_true')
     a=p.parse_args()
     window_seconds(a.window_seconds)
@@ -180,7 +182,7 @@ def main():
                 except subprocess.TimeoutExpired:metrics['status']='query_timeout'
             write_new(out/'counter-capability.json',metrics)
             common=set(probes[0]['rates_mhz'])&set(probes[1]['rates_mhz'])
-            rates,mapping=resolve_rates(a.rates or ([2385] if a.command=='holdout' else [2250,2527]),common)
+            rates,mapping=resolve_rates(a.rates or (list(SWEEP_RATES) if a.command=='sweep' else [2385] if a.command=='holdout' else [2250,2527]),common)
             result['requested_to_supported_mhz']=mapping
             result['control_settings_mhz']=rates
             if a.model:
@@ -198,6 +200,11 @@ def main():
             if a.command=='pilot':
                 result['protocol']=result['protocol'][:1]
                 result['protocol'][0]['case']['seed']+=200000
+            if a.command=='sweep':
+                if a.rates is not None and a.rates!=list(SWEEP_RATES):
+                    raise ValueError('Sweep requires prescribed ordered twelve requested rates')
+                result['protocol']=sweep_jobs(rates,a.sweep_repeats,a.seed)
+                result['scope']='exploratory_resource_frequency_sweep_not_training_or_holdout'
             write_new(out/'protocol.json',dict(jobs=result['protocol'],window_seconds=a.window_seconds,
                 role=a.command,energy_budget_limit=.03))
             if a.command=='check':result['status']='resource_collection_ready_no_writes'

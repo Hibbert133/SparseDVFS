@@ -211,7 +211,7 @@ def main():
         result=merge_training([data]+[read(path) for path in a.extra])
         write_new(Path(a.out),result);print('Merged training settings:',result['training_requested_mhz']);return
     if data.get('status')!='resource_collection_complete':raise ValueError('Complete collection required; no partial fitting')
-    if data.get('collection_role')=='pilot':raise ValueError('Pilot excluded from fitting and validation')
+    if data.get('collection_role') in ('pilot','sweep'):raise ValueError('Pilot/sweep excluded from fitting and validation')
     if a.command=='validate' and not a.model:p.error('--model required for validate')
     result=fit(data['rows']) if a.command=='fit' else validate(read(a.model),data['rows'])
     write_new(Path(a.out),result);print(result.get('status','resource_model_frozen'), 'deployable=False')

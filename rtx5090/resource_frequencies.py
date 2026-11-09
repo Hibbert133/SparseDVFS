@@ -2,6 +2,22 @@
 from collections import Counter
 from .observe_core import digest
 
+SWEEP_RATES=(300,600,900,1200,1500,1800,2025,2250,2527,2700,2850,3000)
+
+
+def sweep_jobs(rates,repeats,seed):
+    if type(repeats) is not int or not 1<=repeats<=3:raise ValueError('Sweep repeats must be 1..3')
+    if len(rates)!=12 or len(set(rates))!=12:raise ValueError('Twelve distinct supported sweep settings required')
+    # Begin at familiar middle settings, then descend; reverse for second pass.
+    order=[rates[i] for i in (7,6,5,4,3,2,1,0,8,9,10,11)]
+    jobs=[]
+    for repeat in range(repeats):
+        for rate in (order if repeat%2==0 else list(reversed(order))):
+            for family,size in (('linear',256),('linear',512),('copy',512)):
+                jobs.append(dict(requested_mhz=rate,repeat=repeat,case=dict(family=family,size=size,
+                    split='train',seed=seed+300000+len(jobs))))
+    return jobs
+
 
 def resolve_rates(requested, common):
     if not requested or len(set(requested))!=len(requested) or any(type(v) is not int or v<=0 for v in requested):
