@@ -175,3 +175,15 @@ These port-choice shapes do not certify the real MLP kernel family or cache stat
 No tiny-copy overhead estimate, automatic fit, Eq2 energy label or formal parameter
 certificate is produced. CUDA failures propagate with a saved partial report; low-memory
 prechecks reject before allocation. Target CUDA execution remains pending.
+
+
+## No-write operator rendezvous v1
+
+The experiment binds actual pre-call tensor metadata and parent plus the source dispatcher
+ordinal, then synchronizes the whole device on the model thread and rendezvous via private
+Unix sockets. It tests four selected boundaries, not a full DAG or dynamic-frequency plan.
+A 10s device-wait watchdog aborts the coordinator; Python cannot cancel a hung CUDA driver
+call. Peer wait is 10s, RPC 12s, HTTP request timeout 120s. Timeout may poison the worker
+and require manual service recovery; no automatic restart or clock writes occur.
+Old collection supplies candidate contracts; the new run records fresh identity separately
+and rechecks actual operands. It does not transfer old model/hardware certificates.

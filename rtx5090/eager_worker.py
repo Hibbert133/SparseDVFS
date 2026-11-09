@@ -31,6 +31,7 @@ class EagerWorker(ObservationWorker):
         self._eg_seq = 0
         self._eg_replay = None
         self._eg_operator_cost = None
+        self._eg_boundary = None
         model = self.model_runner.get_model()
         modules, self._eg_layer_types = discover(model)
         for name, module in modules:
@@ -73,6 +74,8 @@ class EagerWorker(ObservationWorker):
             resolved_weight_loader='auto_actual_loader_class_not_observed')
         value['matrix_replay_version'] = 2
         value['operator_cost_version'] = 2
+        value['operator_boundary_version'] = 1
+        value['operator_boundary_sha256'] = sha(Path(__file__).parent/'operator_boundary_worker.py')
         value['independent_primitives_version'] = 1
         value['independent_primitives_hashes'] = {name: sha(Path(__file__).parent/name) for name in
             ('worker_primitives.py', 'stateless_calibration_adapter.py')}
@@ -93,7 +96,7 @@ class EagerWorker(ObservationWorker):
                 raise RuntimeError('Configure only between complete requests')
             if command['op'] != 'arm': raise ValueError('Unknown eager RPC operation')
             mode = command['mode']
-            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives'): raise ValueError('Unsupported mode')
+            if mode not in ('off', 'observe', 'units', 'serial', 'matrix_replay', 'matrix_calibrate', 'operator_cost', 'independent_primitives', 'operator_boundary'): raise ValueError('Unsupported mode')
             if self._eg_pending and mode != 'off': raise ValueError('A request is already armed')
             if mode == 'serial':
                 core.validate_plan(command['plan'], command['fingerprint'])
@@ -118,6 +121,10 @@ class EagerWorker(ObservationWorker):
             self._eg_tracker = PhaseTracker()
             self._eg_rows, self._eg_events, self._eg_steps = [], [], []
             self._eg_seq = 0
+            if self._eg_mode == 'operator_boundary':
+                from .operator_boundary_worker import BoundaryObserver
+                self._eg_boundary = BoundaryObserver(self.model_runner.get_model(), int(self.rank),
+                    lambda: self._eg_context, command, self._eg_identity)
             if self._eg_mode == 'operator_cost':
                 from .eager_operator_cost import OperatorCost
                 self._eg_operator_cost = OperatorCost(self.model_runner.get_model(), int(self.rank),
@@ -189,7 +196,10 @@ class EagerWorker(ObservationWorker):
                 collect(torch, int(self.rank), self._eg_identity, self._eg_config['out'])
             self._eg_key = core.context_key(context)
             self._eg_order, self._eg_open = [], None
-            if self._eg_mode == 'operator_cost':
+            if self._eg_mode == 'operator_boundary':
+                with self._eg_boundary.scope():
+                    result = super().execute_model(scheduler_output)
+            elif self._eg_mode == 'operator_cost':
                 with self._eg_operator_cost.scope():
                     result = super().execute_model(scheduler_output)
             elif self._eg_mode in ('matrix_replay', 'matrix_calibrate'):
@@ -219,6 +229,12 @@ class EagerWorker(ObservationWorker):
                 for row, start, end in self._eg_events:
                     self._eg_rows.append(dict(row, stream_event_ms=start.elapsed_time(end)))
                 self._eg_events.clear()
+                if self._eg_mode == 'operator_boundary':
+                    self._eg_boundary.finish()
+                    write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-boundary.json',
+                        dict(status='complete',rank=int(self.rank),identity_sha256=digest(self._eg_identity),
+                             contexts=self._eg_boundary.seen,clock_writes=False))
+                    self._eg_boundary.close(); self._eg_boundary = None
                 if self._eg_mode == 'observe': self.observation_stop()
                 if self._eg_mode == 'operator_cost':
                     self._eg_operator_cost.finish()
@@ -258,6 +274,8 @@ class EagerWorker(ObservationWorker):
             self._eg_failure(exc); raise
 
     def _eg_failure(self, exc):
+        if getattr(self, '_eg_boundary', None) is not None:
+            self._eg_boundary.close(); self._eg_boundary = None
         if getattr(self, '_eg_operator_cost', None) is not None:
             self._eg_operator_cost.close()
             write_json(Path(self._eg_config['out'])/f'rank-{self.rank}-operator-cost-failed.json',
