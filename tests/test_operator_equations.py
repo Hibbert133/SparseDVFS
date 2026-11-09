@@ -97,3 +97,37 @@ class GapTests(unittest.TestCase):
         bundle,report=build([a,b])
         self.assertEqual(len(report['rank_contract_mismatches']),2)
         self.assertIsNone(bundle['operators'][0]['ranks'][0]['work_flop'])
+
+class StaticWorkTests(unittest.TestCase):
+    def test_broadcast_float_work_and_rejections(self):
+        from rtx5090.operator_parameter_gaps import elementwise_work
+        def tensor(shape,dtype='torch.float32'):
+            return dict(tensor=True,shape=shape,dtype=dtype,layout='torch.strided')
+        meta=dict(overload='aten.add.Tensor',inputs=dict(args=[tensor([2,3]),tensor([3])]),outputs=tensor([2,3]))
+        self.assertEqual(elementwise_work(meta),dict(work_flop=6,data_byte=60))
+        meta['inputs']['kwargs']={'alpha':2}
+        self.assertIsNone(elementwise_work(meta))
+        meta['inputs']['kwargs']={}
+        meta['inputs']['args'][0]['dtype']='torch.int64'
+        self.assertIsNone(elementwise_work(meta))
+        meta['inputs']['args'][0]=tensor([0,3]);meta['outputs']=tensor([0,3])
+        self.assertEqual(elementwise_work(meta)['work_flop'],0)
+        meta['outputs']=tensor([2,3])
+        self.assertIsNone(elementwise_work(meta))
+
+    def test_rank_normalization_preserves_operation_arguments(self):
+        from rtx5090.operator_parameter_gaps import normalize, differences
+        a=dict(rank=0,kernel_names=['a'],inputs=dict(kwargs=dict(rank=0,device='cuda:0')))
+        b=dict(rank=1,kernel_names=['b'],inputs=dict(kwargs=dict(rank=1,device='cuda:1')))
+        delta=differences(normalize(a),normalize(b))
+        self.assertEqual({x['path'] for x in delta},{'$.inputs.kwargs.rank','$.inputs.kwargs.device'})
+
+    def test_missing_is_not_negative_or_out_of_range(self):
+        bundle,report=build([inventory(0),inventory(1)])
+        reasons={x['reason'] for x in audit(bundle)}
+        self.assertIn('missing_k1',reasons)
+        self.assertNotIn('negative_thermal_slope',reasons)
+        self.assertNotIn('frequency_outside_capacity_calibration',reasons)
+        self.assertNotIn('temperature_outside_calibration',reasons)
+        bundle['thermal']['0']['k1']=-1
+        self.assertIn('negative_thermal_slope',{x['reason'] for x in audit(bundle)})

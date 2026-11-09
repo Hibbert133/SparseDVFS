@@ -90,7 +90,7 @@ def audit(bundle):
             bounds=cap.get('frequency_range_hz');value=state.get('effective_frequency_hz')
             need(isinstance(bounds,list) and len(bounds)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in bounds)
                  and type(value) in (float,int) and bounds[0]<=value<=bounds[1],
-                 'frequency_outside_capacity_calibration',key+':'+str(f))
+                 ('frequency_outside_capacity_calibration' if type(value) in (float,int) and math.isfinite(value) and isinstance(bounds,list) and len(bounds)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in bounds) else 'missing_frequency_calibration_coverage'),key+':'+str(f))
     for rank in (0,1):
         key=str(rank);thermal=bundle.get('thermal',{}).get(key,{})
         need(thermal.get('identifiability_passed') is True and bool(thermal.get('evidence_sha256')),
@@ -98,7 +98,8 @@ def audit(bundle):
         for field in ('k1','k2'):
             value=thermal.get(field)
             need(type(value) in (float,int) and math.isfinite(value),'missing_'+field,key)
-        need(type(thermal.get('k1')) in (float,int) and thermal['k1']>=0,'negative_thermal_slope',key)
+        if type(thermal.get('k1')) in (float,int) and math.isfinite(thermal['k1']):
+            need(thermal['k1']>=0,'negative_thermal_slope',key)
         for f in RATES:
             state=bundle.get('states',{}).get(key,{}).get(str(f),{})
             need(state.get('known_before_prediction') is True and bool(state.get('evidence_sha256')),
@@ -109,11 +110,11 @@ def audit(bundle):
             interval=thermal.get('temperature_range_c')
             need(isinstance(interval,list) and len(interval)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in interval)
                  and type(state.get('temperature_c')) in (float,int) and interval[0]<=state['temperature_c']<=interval[1],
-                 'temperature_outside_calibration',key+':'+str(f))
+                 ('temperature_outside_calibration' if type(state.get('temperature_c')) in (float,int) and math.isfinite(state.get('temperature_c')) and isinstance(interval,list) and len(interval)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in interval) else 'missing_temperature_calibration_coverage'),key+':'+str(f))
             voltage_range=thermal.get('voltage_range_v');voltage=state.get('voltage_v')
             need(isinstance(voltage_range,list) and len(voltage_range)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in voltage_range)
                  and type(voltage) in (float,int) and voltage_range[0]<=voltage<=voltage_range[1],
-                 'voltage_outside_calibration',key+':'+str(f))
+                 ('voltage_outside_calibration' if type(voltage) in (float,int) and math.isfinite(voltage) and isinstance(voltage_range,list) and len(voltage_range)==2 and all(type(x) in (float,int) and math.isfinite(x) for x in voltage_range) else 'missing_voltage_calibration_coverage'),key+':'+str(f))
     return issues
 
 

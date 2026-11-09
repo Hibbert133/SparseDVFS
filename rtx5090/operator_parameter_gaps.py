@@ -9,12 +9,63 @@ from .operator_equations import audit
 from .eager_matrix_replay import case_spec
 
 
-def normalize(value):
-    if isinstance(value,dict):
-        return {k:('cuda:rank' if k=='device' and v in ('cuda:0','cuda:1') else normalize(v))
-                for k,v in value.items() if k not in ('rank','kernel_names')}
-    if isinstance(value,list):return [normalize(v) for v in value]
+def normalize(value, root=True):
+    if isinstance(value, dict):
+        return {k: ('cuda:rank' if value.get('tensor') is True and k == 'device'
+                    and v in ('cuda:0', 'cuda:1') else normalize(v, False))
+                for k, v in value.items() if not (root and k in ('rank', 'kernel_names'))}
+    if isinstance(value, list): return [normalize(v, False) for v in value]
     return value
+
+
+def differences(a, b, path='$'):
+    if type(a) is not type(b): return [dict(path=path, rank0=a, rank1=b)]
+    if isinstance(a, dict):
+        rows=[]
+        for key in sorted(set(a) | set(b)):
+            if key not in a or key not in b:
+                rows.append(dict(path=path+'.'+key, rank0=a.get(key), rank1=b.get(key), missing=True))
+            else: rows.extend(differences(a[key], b[key], path+'.'+key))
+        return rows
+    if isinstance(a, list):
+        if len(a)!=len(b): return [dict(path=path+'.length', rank0=len(a), rank1=len(b))]
+        return [row for i,(x,y) in enumerate(zip(a,b)) for row in differences(x,y,f'{path}[{i}]')]
+    return [] if a==b else [dict(path=path, rank0=a, rank1=b)]
+
+
+def elementwise_work(meta):
+    op=meta.get('overload')
+    if op not in ('aten.add.Tensor', 'aten.sub.Tensor', 'aten.mul.Tensor'): return None
+    args=meta.get('inputs',{}).get('args',[])
+    kwargs=meta.get('inputs',{}).get('kwargs',{})
+    if len(args)!=2 or set(kwargs)-{'alpha'}: return None
+    if kwargs.get('alpha',1)!=1 or (op=='aten.mul.Tensor' and kwargs): return None
+    tensors=args+[meta.get('outputs')]
+    widths={'torch.bfloat16':2,'torch.float16':2,'torch.float32':4,'torch.float64':8}
+    for t in tensors:
+        if not isinstance(t,dict) or t.get('tensor') is not True or t.get('dtype') not in widths: return None
+        if not isinstance(t.get('shape'),list) or any(type(d) is not int or d<0 for d in t['shape']): return None
+        if t.get('layout')!='torch.strided': return None
+    a,b,out=tensors
+    dims=max(len(a['shape']),len(b['shape']))
+    shape=[]
+    for x,y in zip([1]*(dims-len(a['shape']))+a['shape'],[1]*(dims-len(b['shape']))+b['shape']):
+        if x!=y and x!=1 and y!=1: return None
+        shape.append(y if x==1 else x)
+    if out['shape']!=shape: return None
+    return dict(work_flop=math.prod(shape),
+                data_byte=sum(math.prod(t['shape'])*widths[t['dtype']] for t in tensors))
+
+
+def work_class(node):
+    op=node['operator']
+    if 'all_reduce' in op or 'all_gather' in op: return 'collective'
+    if 'attention' in op or 'cache' in op: return 'stateful_attention_or_cache'
+    if not node['kernels']: return 'no_kernel_unresolved_not_zero_cost'
+    if op=='aten.linear.default': return 'linear'
+    if op in ('aten.add.Tensor','aten.sub.Tensor','aten.mul.Tensor'): return 'floating_arithmetic_candidate'
+    if 'copy_' in op or '.to.' in op: return 'copy_or_conversion'
+    return 'other_kernel_family'
 
 
 def linear_work(meta):
@@ -70,7 +121,7 @@ def build(inventories,linear=None):
                 tasks[family_id]=dict(id=family_id,**grouping,occurrences=0,signature_ids=[],
                     representative=node['id'],representative_context=node['context'],
                     representative_parent=node['parent_label'],representative_layer=node['layer'],
-                    replay_policy=policy,control_settings=[2250,2527],reuse_validated=False,
+                    work_class=work_class(node),replay_policy=policy,control_settings=[2250,2527],reuse_validated=False,
                     required=['path_state_kernel_evidence','independent_capacity_bandwidth_overhead',
                               'activity_alpha_at_effective_sparsity_zero','independent_holdout'],
                     static_work_definitions_missing=0)
@@ -82,12 +133,13 @@ def build(inventories,linear=None):
             if priority(node['layer'])<priority(task['representative_layer']):
                 task.update(representative=node['id'],representative_context=node['context'],
                             representative_parent=node['parent_label'],representative_layer=node['layer'])
-            work=linear_work(meta)
+            work=linear_work(meta) or elementwise_work(meta)
             if work is None:task['static_work_definitions_missing']+=1
             row=dict(rank=rank,uuid=GPU_UUIDS[rank],signature_id=node['signature_id'],family_id=family_id,
                 work_flop=work['work_flop'] if work else None,data_byte=work['data_byte'] if work else None,
                 workload_provenance=(inv.get('source_sha256') or digest(inv)) if work else None,
-                data_semantics='logical_tensor_bytes_not_measured_DRAM' if work else None,s_comp=0,s_mem=0)
+                data_semantics='logical_tensor_bytes_not_measured_DRAM' if work else None,s_comp=0,s_mem=0,
+                workload_derivation=('linear_2MNK_v1' if meta.get('overload')=='aten.linear.default' else 'floating_binary_broadcast_v1') if work else None)
             source_rows[(rank,node['id'])]=row
             if linear and work:
                 try:
@@ -103,7 +155,7 @@ def build(inventories,linear=None):
     by_context=[defaultdict(list),defaultdict(list)]
     for r,inv in enumerate(inventories):
         for node in inv['nodes']:by_context[r][node['context']].append(node)
-    mismatches=[]
+    mismatches=[]; mismatch_details=[]
     if set(by_context[0])!=set(by_context[1]):raise ValueError('Rank contexts differ')
     for context,left in by_context[0].items():
         right=by_context[1][context]
@@ -111,7 +163,12 @@ def build(inventories,linear=None):
         for index,(a,b) in enumerate(zip(left,right)):
             ma=inventories[0]['signatures'][a['signature_id']];mb=inventories[1]['signatures'][b['signature_id']]
             unit_id=f'{context}/{index:06d}'
-            if a['parent_label']!=b['parent_label'] or normalize(ma)!=normalize(mb):mismatches.append(unit_id)
+            delta=differences(dict(parent=a['parent_label'],signature=normalize(ma)),
+                              dict(parent=b['parent_label'],signature=normalize(mb)))
+            if delta:
+                mismatches.append(unit_id)
+                mismatch_details.append(dict(id=unit_id,source_nodes=[a['id'],b['id']],
+                    operators=[a['operator'],b['operator']],differences=delta))
             bundle['operators'].append(dict(id=unit_id,context=context,
                 source_nodes=[a['id'],b['id']],ranks=[source_rows[(0,a['id'])],source_rows[(1,b['id'])]]))
     for r in (0,1):
@@ -122,6 +179,11 @@ def build(inventories,linear=None):
     report=dict(status='calibration_tasks_ready_not_parameters_validated',clock_writes=False,deployable=False,
         source_inventory_sha256=bundle['source_inventory_sha256'],pair_occurrences=len(bundle['operators']),
         candidate_families=len(tasks),rank_contract_mismatches=mismatches,
+        rank_mismatch_details=mismatch_details,
+        family_class_counts=dict(Counter(t['work_class'] for t in tasks.values())),
+        static_work_coverage=dict(rank_occurrences=len(source_rows),
+            derived=sum(r['work_flop'] is not None for r in source_rows.values()),
+            missing=sum(r['work_flop'] is None for r in source_rows.values())),
         linear_diagnostic_matches=len(prior_matches),linear_matches=prior_matches,
         linear_source_sha256=digest(linear) if linear else None,
         tasks=list(tasks.values()),missing_evidence_counts=dict(Counter(x['reason'] for x in audit(bundle))),
@@ -141,8 +203,12 @@ def main():
         f"candidate parameter families: {report['candidate_families']}",
         f"historical linear matches: {report['linear_diagnostic_matches']}",
         f"rank contract mismatches: {len(report['rank_contract_mismatches'])}",
-        'Missing: '+str(report['missing_evidence_counts']),
+        'Static workload coverage: '+str(report['static_work_coverage']),
+        'Family classes: '+str(report['family_class_counts']),
+        'Missing (occurrence/family/shared counts, not collection jobs): '+str(report['missing_evidence_counts']),
         'No service access, restart, new sampling or clock writes.']
+    for item in report['rank_mismatch_details'][:10]:
+        lines.append('Rank difference: '+str(dict(id=item['id'],operators=item['operators'],differences=item['differences'][:10])))
     (out/'REPORT.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     print('\n'.join(lines));print('Saved:',out)
 
