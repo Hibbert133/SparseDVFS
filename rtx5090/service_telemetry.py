@@ -197,15 +197,18 @@ def clock_errors(frames, target=None, memory_reference=None):
 
 class DualClocks:
     """Own both clocks as one transaction; reset every touched device on any failure."""
-    def __init__(self, devices, apply=False):
+    def __init__(self, devices, apply=False, allowed_rates=(2250, 2527)):
         self.devices, self.allow_apply = devices, apply
+        self.allowed_rates = frozenset(allowed_rates)
+        if not self.allowed_rates or any(type(f) is not int or f <= 0 for f in self.allowed_rates):
+            raise ValueError('Explicit positive integer clock allowlist required')
         self.dirty = []
         self.last_target = None
         self.restore_result = dict(required=False, reset_returned=False, verified=False)
 
     def set(self, mhz):
         if not self.allow_apply: raise ValueError('Real writes require --apply')
-        if mhz not in (2250, 2527): raise ValueError('Only 2250/2527 MHz allowed')
+        if mhz not in self.allowed_rates: raise ValueError('Clock outside explicit allowed rates')
         self.last_target = mhz
         self.restore_result = dict(required=True, reset_returned=False, verified=False)
         for device in self.devices:

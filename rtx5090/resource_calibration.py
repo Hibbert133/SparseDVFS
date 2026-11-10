@@ -115,13 +115,17 @@ async def one(identity, client, out, spec, a):
 
 
 async def collect(a, identity, devices, out, result):
-    controller=telemetry.DualClocks(devices,apply=True)
+    controller=telemetry.DualClocks(devices,apply=True,
+        allowed_rates=result['control_settings_mhz'])
     try:
         async with service_client.BenchClient(identity['base_url'],service.model_id(identity)) as client:
             baseline=await service.load_frames(client,devices,a.seed,out.name+'baseline',out/'baseline.json')
             try:
                 for index,job in enumerate(result['protocol']):
-                    result['clock_writes']=True;controller.set(job['requested_mhz'])
+                    try:
+                        controller.set(job['requested_mhz'])
+                    finally:
+                        result['clock_writes']=bool(controller.restore_result.get('required'))
                     await service.load_frames(client,devices,a.seed+index,out.name+str(index),out/f'precondition-{index}.json')
                     tag=f"{index:03d}-{job['requested_mhz']}-{job['case']['family']}"
                     service.emit(dict(status='collecting_resource',index=index+1,total=len(result['protocol']),window=tag))
@@ -131,7 +135,8 @@ async def collect(a, identity, devices, out, result):
                     service.emit(dict(status='resource_energy_gate_passed',window=tag,
                         relative_budgets={r['uuid']:r['energy_relative_budget'] for r in rows}))
             finally:
-                await service.restore_checked(controller,client,devices,baseline,a.seed+90000,out.name+'restore',out/'restored.json')
+                if controller.restore_result.get('required'):
+                    await service.restore_checked(controller,client,devices,baseline,a.seed+90000,out.name+'restore',out/'restored.json')
     finally:
         try:
             if controller.dirty:controller.reset()

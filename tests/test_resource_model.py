@@ -13,6 +13,36 @@ from rtx5090.resource_calibration import HostWindow
 
 
 class ResourceTests(unittest.TestCase):
+    def test_holdout_clock_allowlist_and_partial_write_recovery(self):
+        from rtx5090.service_telemetry import DualClocks
+        devices=[Mock(uuid='a'),Mock(uuid='b')]
+        default=DualClocks(devices,apply=True)
+        with self.assertRaises(ValueError):default.set(2385)
+        self.assertIsNone(default.last_target)
+        for d in devices:d.set.assert_not_called()
+        controller=DualClocks(devices,apply=True,allowed_rates=[2385,300,3000])
+        devices[1].set.side_effect=RuntimeError('write failed')
+        with self.assertRaises(RuntimeError):controller.set(2385)
+        self.assertTrue(controller.restore_result['required'])
+        self.assertEqual(controller.last_target,2385)
+        controller.reset()
+        for d in devices:d.reset.assert_called_once()
+
+    def test_rejected_clock_preserves_error_without_none_restore(self):
+        from rtx5090.resource_calibration import collect
+        context=Mock()
+        context.__aenter__=AsyncMock(return_value=Mock())
+        context.__aexit__=AsyncMock(return_value=False)
+        result={'control_settings_mhz':[2250], 'protocol':[{'requested_mhz':2385}]}
+        with patch('rtx5090.resource_calibration.service_client.BenchClient',return_value=context), \
+             patch('rtx5090.resource_calibration.service.model_id',return_value='unused'), \
+             patch('rtx5090.resource_calibration.service.load_frames',new=AsyncMock(return_value=[])), \
+             patch('rtx5090.resource_calibration.service.restore_checked',new=AsyncMock()) as restore:
+            with self.assertRaisesRegex(ValueError,'allowed rates'):
+                asyncio.run(collect(SimpleNamespace(seed=1),{'base_url':'unused'},[],Path('unused'),result))
+            restore.assert_not_awaited()
+        self.assertFalse(result['restoration']['required'])
+
     def test_bounded_configurable_duration(self):
         self.assertEqual(window_seconds(30),30)
         self.assertEqual(window_seconds(120),120)
@@ -82,7 +112,7 @@ class ResourceTests(unittest.TestCase):
         controller.dirty=[];controller.restore_result={'required':True,'verified':True}
         client=Mock();context=Mock()
         context.__aenter__=AsyncMock(return_value=client);context.__aexit__=AsyncMock(return_value=False)
-        identity={'base_url':'unused'};result={'protocol':[{'requested_mhz':2250,'case':{}}]}
+        identity={'base_url':'unused'};result={'control_settings_mhz':[2250], 'protocol':[{'requested_mhz':2250,'case':{}}]}
         with patch('rtx5090.resource_calibration.telemetry.DualClocks',return_value=controller), \
              patch('rtx5090.resource_calibration.service_client.BenchClient',return_value=context), \
              patch('rtx5090.resource_calibration.service.model_id',return_value='unused'), \
