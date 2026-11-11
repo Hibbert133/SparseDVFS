@@ -12,7 +12,7 @@ WSL Bash, in the existing Conda environment:
 Launch WSL from a Windows administrator terminal for real clock writes.
 There is no bridge, socket, Windows Python, pynvml, or project-package import.
 The Windows driver tools nvidia-smi.exe and powershell.exe must be accessible.
-PowerShell checks Windows privilege and manages this run's hidden sampler.
+Python starts the sampler directly; PowerShell checks privilege and Windows PID ownership.
 
 Preserved: torchvision vit_b_16 IMAGENET1K_V1, default precision, random
 (1,3,224,224), author layer selection/input hooks/gradient scopes, five warmups,
@@ -40,6 +40,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 
 SOURCE_COMMIT = "c524c51aac552fd16bec5743b1fb95309b46347b"
 DEFAULT_UUID = "GPU-22d1cd22-d198-45c4-2b54-974484026ab5"
@@ -58,6 +59,20 @@ def write_json(path, value):
 def append_jsonl(path, value):
     with Path(path).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n")
+
+
+def error_message(exc):
+    """Readable terminal error; full command/traceback stays in the output files."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        executable = Path(str(exc.cmd[0])).name
+        return f"{executable} timed out after {exc.timeout} seconds (see commands.jsonl)"
+    return str(exc) or type(exc).__name__
+
+
+def log_failure(out, stage, exc):
+    with (Path(out) / "errors.log").open("a", encoding="utf-8") as stream:
+        stream.write(f"\nStage: {stage}\n" + traceback.format_exc())
+    logger.error("%s failed: %s. See %s", stage, error_message(exc), Path(out) / "errors.log")
 
 
 def number(value, field, optional=False):
@@ -130,6 +145,11 @@ class NvidiaSMI:
             return result.stdout
         except BaseException as exc:
             row["error"] = str(exc)
+            if isinstance(exc, subprocess.TimeoutExpired):
+                row["timeout_seconds"] = exc.timeout
+                for field in ("stdout", "stderr"):
+                    value = getattr(exc, field, None)
+                    row[field] = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
             raise
         finally:
             row["ended_monotonic_ns"] = time.monotonic_ns()
@@ -198,6 +218,7 @@ class NvidiaSMI:
 
 class PowerSampler:
     """One Windows loop process for the run; bounded RAM, full raw CSV on disk."""
+    startup_timeout = 10
     fields = ("timestamp", "uuid", "clocks.current.graphics", "clocks.current.memory",
               "power.draw", "temperature.gpu", "utilization.gpu")
 
@@ -211,7 +232,16 @@ class PowerSampler:
         self.frames = deque(maxlen=10000)
         self.error, self.thread, self.marker = None, None, None
         self.pid, self.count = None, 0
+        self.process = None  # On WSL this PID is a relay, not the Windows PID.
+        self.stdout_handle = self.stderr_handle = None
         self.cleanup = dict(required=False, verified=False)
+
+    def owned_query(self):
+        # Match the unique output path, never all nvidia-smi processes.
+        predicate = ("$_.CommandLine -and $_.CommandLine.Contains("
+                     + ps_literal(self.marker) + ")")
+        return ('@(Get-CimInstance Win32_Process -Filter "Name = \'nvidia-smi.exe\'"'
+                + " | Where-Object { " + predicate + " })")
 
     def start(self):
         self.marker = windows_path(self.raw)
@@ -219,36 +249,73 @@ class PowerSampler:
                      "--query-gpu=" + ",".join(self.fields),
                      "--format=csv,noheader,nounits", "--loop-ms=20",
                      "--filename=" + self.marker]
-        # Start-Process is needed to own the Windows PID, not just a WSL relay.
-        code = ("$p=Start-Process -FilePath " + ps_literal(windows_path(self.device.smi))
-                + " -ArgumentList " + ps_literal(subprocess.list2cmdline(arguments))
-                + " -WindowStyle Hidden -PassThru"
-                + " -RedirectStandardOutput " + ps_literal(windows_path(self.stdout))
-                + " -RedirectStandardError " + ps_literal(windows_path(self.stderr))
-                + "; $p.Id")
+        argv = [self.device.smi, *arguments]
+        logger.info("Starting board-power sampler (20 ms query interval)...")
+        self.stdout_handle = self.stdout.open("wb")
+        self.stderr_handle = self.stderr.open("wb")
         self.cleanup["required"] = True
-        output = self.device.ps(code).strip()
-        if not output.isdigit():
-            raise RuntimeError(f"Cannot obtain Windows sampler PID: {output!r}")
-        self.pid = int(output)
-        write_json(self.device.out / "power_sampler.json",
-                   dict(windows_pid=self.pid, raw_csv=str(self.raw), interval_request_ms=20,
-                        timestamp_basis="Windows wall timestamp plus WSL receive monotonic time"))
+        launch = dict(argv=argv, started_monotonic_ns=time.monotonic_ns(), mode="Popen")
+        try:
+            # Files, not PIPEs: startup never waits for a long-lived process/EOF.
+            options = dict(stdin=subprocess.DEVNULL, stdout=self.stdout_handle,
+                           stderr=self.stderr_handle)
+            if os.name == "nt":  # Development-side Windows process tests.
+                options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            self.process = subprocess.Popen(argv, **options)
+            launch["relay_pid"] = self.process.pid
+        except OSError as exc:
+            self.cleanup["required"] = False  # Popen did not create a process.
+            launch["error"] = str(exc)
+            raise
+        finally:
+            launch["ended_monotonic_ns"] = time.monotonic_ns()
+            append_jsonl(self.device.out / "commands.jsonl", launch)
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
-        if not self.ready.wait(10):
-            raise RuntimeError("No sampler data within 10 s: " + self.diagnostics())
+        if not self.ready.wait(self.startup_timeout):
+            self.check_process()
+            raise RuntimeError(f"Sampler startup: fewer than 3 valid records within "
+                               f"{self.startup_timeout} s: " + self.diagnostics())
         self.check()
+        code = ("$owned=" + self.owned_query()
+                + "; if($owned.Count -ne 1){ throw 'Expected exactly one owned Windows sampler' }; "
+                + "$owned[0].ProcessId")
+        try:
+            output = self.device.ps(code).strip()
+            if not output.isdigit():
+                raise RuntimeError(f"Invalid Windows PID: {output!r}")
+            self.pid = int(output)
+            self.check()
+        except Exception as exc:
+            raise RuntimeError("Sampler PID verification: " + error_message(exc)
+                               + "; " + self.diagnostics()) from exc
+        write_json(self.device.out / "power_sampler.json",
+                   dict(windows_pid=self.pid, relay_pid=self.process.pid,
+                        raw_csv=str(self.raw), interval_request_ms=20, startup_valid_records=self.count,
+                        timestamp_basis="Windows wall timestamp plus WSL receive monotonic time"))
+        logger.info("Power sampler ready: Windows PID=%s, valid records=%s", self.pid, self.count)
         return self
 
     def diagnostics(self):
-        return " ".join(p.read_text(encoding="utf-8", errors="replace")[-2000:]
-                        for p in (self.stdout, self.stderr) if p.exists())
+        parts = []
+        for path in (self.stdout, self.stderr):
+            if path.exists():
+                with path.open("rb") as stream:
+                    stream.seek(max(0, path.stat().st_size - 2000))
+                    parts.append(path.name + ": " + stream.read().decode("utf-8", errors="replace"))
+        return " ".join(parts)
+
+    def check_process(self):
+        if self.process is not None:
+            code = self.process.poll()
+            if code is not None:
+                raise RuntimeError(f"Power sampler exited (returncode={code}): " + self.diagnostics())
 
     def _read(self):
         try:
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + self.startup_timeout
             while not self.raw.exists():
+                self.check_process()
                 if self.stop_event.wait(0.02):
                     return
                 if time.monotonic() > deadline:
@@ -256,6 +323,7 @@ class PowerSampler:
             with self.raw.open(encoding="utf-8-sig", errors="strict") as stream:
                 pending, last = "", time.monotonic()
                 while not self.stop_event.is_set():
+                    self.check_process()
                     part = stream.readline()
                     if not part:
                         if time.monotonic() - last > 5:
@@ -287,7 +355,8 @@ class PowerSampler:
                         self.frames.append(frame)
                     append_jsonl(self.device.out / "power_samples.jsonl", frame)
                     last = time.monotonic()
-                    self.ready.set()
+                    if self.count >= 3:
+                        self.ready.set()
         except BaseException as exc:
             self.error = str(exc)
             self.ready.set()
@@ -295,6 +364,7 @@ class PowerSampler:
     def check(self):
         if self.error:
             raise RuntimeError("Power sampler failed: " + self.error)
+        self.check_process()
         with self.lock:
             if not self.frames or time.monotonic_ns() - self.frames[-1]["received_monotonic_ns"] > 5e9:
                 raise RuntimeError("Power samples are missing or stale.")
@@ -307,19 +377,9 @@ class PowerSampler:
             return [dict(f) for f in self.frames
                     if begin_ns <= f["received_monotonic_ns"] <= end_ns]
 
-    def close(self):
-        self.stop_event.set()
-        reader_error = None
-        if self.thread:
-            self.thread.join(timeout=2)
-            if self.thread.is_alive():
-                reader_error = "Power reader thread did not stop."
+    def stop_windows(self):
         if self.cleanup["required"] and self.marker:
-            # The marker is a new, per-run CSV path. Never kill all nvidia-smi processes.
-            predicate = ("$_.CommandLine -and $_.CommandLine.Contains("
-                         + ps_literal(self.marker) + ")")
-            query = ('@(Get-CimInstance Win32_Process -Filter "Name = \'nvidia-smi.exe\'"'
-                     + " | Where-Object { " + predicate + " })")
+            query = self.owned_query()
             identity_check = (f'$known=Get-CimInstance Win32_Process -Filter "ProcessId = {self.pid}"; '
                               "if($known -and $known.Name -eq 'nvidia-smi.exe' -and "
                               "-not $known.CommandLine){ throw 'Cannot verify sampler ownership' }; "
@@ -332,14 +392,49 @@ class PowerSampler:
                     + "; if($left.Count){ throw 'Owned Windows sampler still running' }; "
                     + "@{stopped_pids=$ids; verified=$true} | ConvertTo-Json -Compress")
             self.cleanup.update(json.loads(self.device.ps(code)))
-            if self.pid is None and not self.cleanup.get("stopped_pids"):
+            if self.cleanup.get("verified") is not True:
+                raise RuntimeError("Windows sampler cleanup was not verified")
+
+    def close(self):
+        self.stop_event.set()
+        errors = []
+        if self.thread:
+            self.thread.join(timeout=2)
+            if self.thread.is_alive():
+                self.cleanup["reader_error"] = "Power reader thread did not stop."
+                errors.append(self.cleanup["reader_error"])
+        try:
+            self.stop_windows()
+        except Exception as exc:
+            self.cleanup["verified"] = False
+            errors.append(error_message(exc))
+        finally:
+            try:
+                if self.process is not None:
+                    try:
+                        self.cleanup["relay_returncode"] = self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                        self.cleanup["relay_returncode"] = self.process.wait(timeout=2)
+                        self.cleanup["relay_forced"] = True
+                        # Recheck Windows after the relay is gone, including startup races.
+                        self.stop_windows()
+                    self.cleanup["relay_reaped"] = True
+                elif self.cleanup["required"] and not self.cleanup.get("stopped_pids"):
+                    self.cleanup["verified"] = False
+                    errors.append("Sampler launch and cleanup could not be verified.")
+            except Exception as exc:
                 self.cleanup["verified"] = False
-                reader_error = reader_error or "Sampler launch PID and cleanup could not be verified."
-        if reader_error:
-            self.cleanup["reader_error"] = reader_error
+                errors.append(error_message(exc))
+            finally:
+                for handle in (self.stdout_handle, self.stderr_handle):
+                    if handle is not None:
+                        handle.close()
+        if errors:
+            self.cleanup["errors"] = errors
         write_json(self.device.out / "power_sampler_cleanup.json", self.cleanup)
-        if reader_error:
-            raise RuntimeError(reader_error)
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
 
 class PowerMonitor:
@@ -426,9 +521,12 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
     results = []
     total_combinations = len(target_layers) * len(frequency_combinations)
     time.sleep(1)  # Author initial state stabilization.
+    logger.info("Initial state stabilization complete")
     pbar = tqdm(total=total_combinations, desc=f"Profiling {model_name}")
+    current_combination = 0
     try:
         for layer_name in target_layers:
+            logger.info("\nPreparing input tensor for layer '%s'...", layer_name)
             try:
                 layer_input = get_layer_input_tensor(model, layer_name, input_tensor)
             except Exception as exc:
@@ -439,6 +537,7 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                 pbar.update(len(frequency_combinations))
                 continue
             if layer_input is None:
+                logger.warning("Cannot get input tensor for layer '%s', skipping", layer_name)
                 append_jsonl(GPU.out / "failures.jsonl",
                              dict(layer_name=layer_name, status="input_capture_failed"))
                 pbar.update(len(frequency_combinations))
@@ -451,6 +550,9 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                 pbar.update(len(frequency_combinations))
                 continue
             for gpu_freq in frequency_combinations:
+                current_combination += 1
+                logger.info("\n[%s/%s] Profiling: Layer='%s', GPU=%.0fMHz (CPU/memory system-managed)",
+                            current_combination, total_combinations, layer_name, gpu_freq)
                 context = dict(layer_name=layer_name, requested_gpu_freq=gpu_freq)
                 stage = "control"
                 try:
@@ -459,8 +561,8 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                     time.sleep(0.5)  # Author additional stabilization.
                     actual = GPU.read()  # Author reads before synchronization/warmup.
                     append_jsonl(GPU.out / "clock_readbacks.jsonl", dict(**context, **actual))
-                    logger.info("Configuration set. GPU target/actual=%s/%s MHz, memory=%s MHz",
-                                gpu_freq, actual["gpu_freq"], actual["memory_freq"])
+                    logger.info("  > Configuration set. GPU Freq: %.2fMHz, Memory: %.2fMHz (target: %sMHz)",
+                                actual["gpu_freq"], actual["memory_freq"], gpu_freq)
                     stage = "compute"
                     torch.cuda.synchronize()
                     # Keep the author's gradient scopes, warmup count and timing.
@@ -486,7 +588,10 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                     stage = "compute"
                     latency_s = np.mean(latencies)
                     energy_j = avg_power_w * latency_s
+                    logger.info("  > Measurement successful: Avg latency: %.2fms, Avg power: %.2fW, Energy: %.4fJ",
+                                latency_s * 1000, avg_power_w, energy_j)
                     sparsity = calculate_sparsity(output_tensor)
+                    logger.info("  > Sparsity: %.2f%%", sparsity * 100)
                     stage = "output"
                     samples = power_monitor.samples
                     row = dict(model=model_name, model_type=model_type, layer_name=layer_name,
@@ -513,9 +618,6 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                                  dict(**context, latencies_s=latencies,
                                       sample_indices=[f["sample_index"] for f in samples],
                                       sample_selection="WSL_receive_time_not_cross_OS_clock_sync"))
-                    logger.info("%s GPU target/actual=%s/%s MHz: %.4f ms, %.2f W, %.6f J, sparsity %.2f%%",
-                                layer_name, gpu_freq, actual["gpu_freq"], latency_s * 1000,
-                                avg_power_w, energy_j, sparsity * 100)
                 except BaseException as exc:
                     append_jsonl(GPU.out / "failures.jsonl",
                                  dict(**context, status="failed", error=str(exc),
@@ -769,6 +871,8 @@ def restore(device, model, input_tensor, sampler, baseline):
         result["reset_returned"] = device.reset()
         time.sleep(1)  # Author restoration wait.
         result["post_reset_snapshot"] = device.read()
+        logger.info("Restored GPU frequency readback: %.2fMHz (automatic mode requested)",
+                    result["post_reset_snapshot"]["gpu_freq"])
         if sampler is not None and model is not None:
             after = loaded_readbacks(model, input_tensor, sampler)
             before = [f["gpu_freq"] for f in baseline if (f["utilization_pct"] or 0) > 0]
@@ -815,14 +919,18 @@ def _termination(signum, frame):
 def load_vit():
     """Author primary pretrained model and original Torch Hub fallback."""
     try:
-        return torchvision.models.vit_b_16(
+        model = torchvision.models.vit_b_16(
             weights=torchvision.models.ViT_B_16_Weights.IMAGENET1K_V1).cuda().eval()
+        logger.info("ViT-Base (Transformer) model loaded successfully")
+        return model
     except Exception as exc:
         logger.error("ViT loading failed: %s", exc)
         logger.info("Attempting to load ViT from PyTorch Hub...")
         try:
-            return torch.hub.load('pytorch/vision:v0.10.0', 'vit_b_16',
-                                  pretrained=True).cuda().eval()
+            model = torch.hub.load('pytorch/vision:v0.10.0', 'vit_b_16',
+                                   pretrained=True).cuda().eval()
+            logger.info("ViT-Base (Transformer) model loaded successfully from PyTorch Hub")
+            return model
         except Exception as fallback_exc:
             logger.error("ViT loading from PyTorch Hub failed: %s", fallback_exc)
             raise
@@ -846,47 +954,58 @@ def main(argv=None):
     model = input_tensor = data = None
     baseline = []
     code = 0
+    stage = "preflight"
     previous_handlers = {sig: signal.signal(sig, _termination)
                          for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         GPU = NvidiaSMI(args.uuid, out, args.apply, args.ack_default_auto)
         report = preflight(GPU)
         write_json(out / "preflight.json", report)
+        if args.apply and not report["windows_admin"]:
+            raise RuntimeError("Windows administrator rights required: reopen Windows Terminal "
+                               "as administrator, enter WSL and reuse this environment. "
+                               "WSL sudo does not elevate Windows.")
+        stage = "power sampler startup"
+        SAMPLER = PowerSampler(GPU)
+        SAMPLER.start()
+        report["sampler_startup_passed"] = True
+        report["sampler_startup_valid_records"] = SAMPLER.count
+        write_json(out / "preflight.json", report)
         if args.check_only:
             status["status"] = "preflight_passed_read_only"
-            logger.info("PRECHECK PASS: UUID=%s, candidates=%s, Windows admin=%s, weights cached=%s. "
-                        "Clock writes/restoration have NOT been tested.",
-                        args.uuid, len(report["gpu"]["rates_mhz"]),
-                        report["windows_admin"], report["weights_cached"])
         else:
-            if not report["windows_admin"]:
-                raise RuntimeError("Windows administrator rights required: reopen Windows Terminal "
-                                   "as administrator, enter WSL and reuse this environment. "
-                                   "WSL sudo does not elevate Windows.")
+            logger.info("\n" + "=" * 60)
+            logger.info("Starting Sparsity and DVFS Analysis")
+            logger.info("=" * 60)
+            stage = "ViT loading"
             input_tensor = torch.randn(1, 3, 224, 224).cuda()
             model = load_vit()
             target_layers = get_all_layers(model, "transformer")
             if not target_layers:
                 raise RuntimeError("Author selection produced no ViT target layers")
             write_json(out / "target_layers.json", target_layers)
-            SAMPLER = PowerSampler(GPU)
-            SAMPLER.start()
+            rates = report["gpu"]["rates_mhz"]
+            logger.info("Device supported frequency ranges (in MHz):")
+            logger.info("  GPU: %.2fMHz - %.2fMHz", min(rates), max(rates))
+            logger.info("  CPU/memory: system-managed")
+            logger.info("Will test %s frequency combinations (actual reported frequencies)", len(rates))
+            stage = "restoration baseline"
             baseline = loaded_readbacks(model, input_tensor, SAMPLER)
             status["real_cuda_workload_executed"] = True
             write_json(out / "baseline_loaded_readbacks.json", baseline)
-            logger.info("ViT-Base: %s layers x %s reported candidate clocks. "
-                        "CPU/memory system-managed; author layer timing and energy estimator.",
-                        len(target_layers), len(report["gpu"]["rates_mhz"]))
+            logger.info("\nStarting profiling for ViT-Base (transformer)...")
+            stage = "ViT profiling"
             data = profile_model(model, "ViT-Base", "transformer", target_layers,
                                  report["gpu"]["rates_mhz"], input_tensor)
             if data.empty:
                 raise RuntimeError("No valid measurement cells; inspect failures.jsonl")
             status.update(status="profiled", valid_cells=len(data))
+            logger.info("Profiling data saved to: %s", out / "profiling_results_ViT-Base.csv")
     except BaseException as exc:
         code = 130 if isinstance(exc, KeyboardInterrupt) else (
             int(exc.code) if isinstance(exc, SystemExit) and isinstance(exc.code, int) else 1)
-        status.update(status="failed", error=str(exc), error_type=type(exc).__name__)
-        logger.exception("Stopped; preserve this output directory: %s", out)
+        status.update(status="failed", stage=stage, error=error_message(exc), error_type=type(exc).__name__)
+        log_failure(out, stage, exc)
     finally:
         # Finish bounded cleanup even if Ctrl+C is pressed a second time.
         for sig in previous_handlers:
@@ -895,6 +1014,8 @@ def main(argv=None):
         try:
             if GPU is not None:
                 status["clock_write_attempted"] = GPU.last_target is not None
+                if GPU.dirty:
+                    logger.info("\nProfiling complete/stopped, restoring default automatic GPU frequency...")
                 restoration = restore(GPU, model, input_tensor, SAMPLER, baseline)
             write_json(out / "restore_status.json", restoration)
             if restoration.get("errors"):
@@ -916,10 +1037,8 @@ def main(argv=None):
                         status.update(status="power_sampler_failed", sampler_error=SAMPLER.error)
             except BaseException as exc:
                 code = 1
-                status.update(status="sampler_cleanup_failed", sampler_cleanup_error=str(exc))
-                write_json(out / "power_sampler_cleanup.json",
-                           dict(required=True, verified=False, error=str(exc)))
-                logger.error("SAMPLER CLEANUP FAILED: %s", exc)
+                status.update(status="sampler_cleanup_failed", sampler_cleanup_error=error_message(exc))
+                log_failure(out, "sampler cleanup", exc)
             finally:
                 for sig, handler in previous_handlers.items():
                     signal.signal(sig, handler)
@@ -936,9 +1055,16 @@ def main(argv=None):
         except BaseException as exc:
             code = 1
             status.update(status="plot_failed", plot_error=str(exc))
-            logger.exception("Plots failed; completed CSV and GPU restoration record are preserved")
+            log_failure(out, "plotting", exc)
         finally:
             os.chdir(previous_cwd)
+    if code == 0 and args.check_only:
+        logger.info("PRECHECK PASS: UUID=%s, candidates=%s, Windows admin=%s, weights cached=%s. "
+                    "Sampler startup/cleanup passed; clock writes/restoration have NOT been tested.",
+                    args.uuid, len(report["gpu"]["rates_mhz"]),
+                    report["windows_admin"], report["weights_cached"])
+    elif status["status"] in ("completed", "completed_restore_unverified"):
+        logger.info("\nAll profiling and visualization completed. Check output files for detailed results.")
     status["exit_code"] = code
     write_json(out / "status.json", status)
     logger.info("Output: %s | status=%s | exit=%s", out, status["status"], code)

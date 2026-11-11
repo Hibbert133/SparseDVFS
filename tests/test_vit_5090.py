@@ -1,4 +1,4 @@
-"""CPU control fixtures only. These do not establish 5090/CUDA/clock/energy acceptance."""
+"""CPU fixtures and real Windows helper processes; no 5090/CUDA/clock/energy acceptance."""
 import ast
 from contextlib import contextmanager
 import csv
@@ -8,6 +8,8 @@ import io
 import json
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import time
@@ -104,6 +106,40 @@ class ControlTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not match"):
                 m.cuda_identity(UUID)
 
+    def test_timeout_keeps_partial_output_without_encoded_command_in_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = device(tmp)
+            command = ["powershell.exe", "-EncodedCommand", "LONG_ENCODED_COMMAND"]
+            problem = subprocess.TimeoutExpired(command, 20, output=b"partial PID", stderr=b"real error")
+            with patch.object(m.subprocess, "run", side_effect=problem):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    d.command(command)
+            record = json.loads((Path(tmp) / "commands.jsonl").read_text())
+            self.assertEqual(record["stdout"], "partial PID")
+            self.assertEqual(record["stderr"], "real error")
+            self.assertEqual(record["timeout_seconds"], 20)
+            self.assertNotIn("LONG_ENCODED_COMMAND", m.error_message(problem))
+
+    def test_sampler_start_failure_prevents_model_and_frequency_writes(self):
+        for problem in (RuntimeError("no samples"), KeyboardInterrupt()):
+            with self.subTest(problem=type(problem).__name__), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "run"
+                d = device(out)
+                d.run = Mock()
+                sampler = NS(start=Mock(side_effect=problem), close=Mock(), count=0, error=None)
+                report = dict(gpu=dict(rates_mhz=[2250]), windows_admin=True, weights_cached=True)
+                with patch.dict(os.environ), patch.object(m, "NvidiaSMI", return_value=d), \
+                     patch.object(m, "preflight", return_value=report), \
+                     patch.object(m, "PowerSampler", return_value=sampler), \
+                     patch.object(m, "load_vit") as load:
+                    code = m.main(["--apply", "--ack-default-auto", "--out", str(out)])
+                self.assertNotEqual(code, 0)
+                sampler.close.assert_called_once()
+                load.assert_not_called()
+                d.run.assert_not_called()
+                self.assertIn("Traceback", (out / "errors.log").read_text())
+                self.assertFalse(json.loads((out / "status.json").read_text())["clock_write_attempted"])
+
     def test_check_only_no_weights_no_write_no_reset_and_records_pending_hardware(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = device(tmp, apply=False)
@@ -126,17 +162,22 @@ class ControlTests(unittest.TestCase):
             d.set.assert_not_called()
             d.reset.assert_not_called()
 
-    def test_main_check_only_never_creates_sampler_or_calls_restore_write(self):
+    def test_main_check_only_checks_sampler_without_model_or_clock_writes(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = device(tmp, apply=False)
             d.run = Mock()
             out = Path(tmp) / "new"
             report = dict(gpu=dict(rates_mhz=[2250]), windows_admin=False, weights_cached=False)
+            sampler = NS(start=Mock(), close=Mock(), count=3, error=None)
             with patch.dict(os.environ), patch.object(m, "NvidiaSMI", return_value=d), \
                  patch.object(m, "preflight", return_value=report), \
-                 patch.object(m, "PowerSampler") as sampler:
+                 patch.object(m, "PowerSampler", return_value=sampler) as factory, \
+                 patch.object(m, "load_vit") as model:
                 self.assertEqual(m.main(["--check-only", "--out", str(out)]), 0)
-            sampler.assert_not_called()
+            factory.assert_called_once_with(d)
+            sampler.start.assert_called_once()
+            sampler.close.assert_called_once()
+            model.assert_not_called()
             d.run.assert_not_called()
             status = json.loads((out / "status.json").read_text())
             self.assertFalse(status["clock_write_attempted"])
@@ -165,19 +206,34 @@ class ControlTests(unittest.TestCase):
 
 
 class SamplerTests(unittest.TestCase):
+    def setUp(self):
+        logging.basicConfig(level=logging.WARNING, force=True)
+
     def make_sampler(self, tmp, row_uuid=UUID, power="100"):
         d = device(tmp)
         s = m.PowerSampler(d)
+        process = NS(pid=9999, poll=Mock(return_value=None), wait=Mock(return_value=0), kill=Mock())
+        def launch(argv, **kwargs):
+            self.assertEqual(argv[:3], [d.smi, "-i", UUID])
+            self.assertIn("--loop-ms=20", argv)
+            self.assertIn("--filename=" + str(s.raw), argv)
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertTrue(hasattr(kwargs["stdout"], "fileno"))
+            self.assertTrue(hasattr(kwargs["stderr"], "fileno"))
+            s.raw.write_text(
+                f"2026/11/11 10:00:00.001, {row_uuid}, 2250, 13801, {power}, 50, 90\n" * 3,
+                encoding="utf-8")
+            return process
+        s.launch_mock = self.enterContext(patch.object(m.subprocess, "Popen", side_effect=launch))
         def powershell(code):
-            if "$p=Start-Process" in code:
-                s.raw.write_text(
-                    f"2026/11/11 10:00:00.001, {row_uuid}, 2250, 13801, {power}, 50, 90\n",
-                    encoding="utf-8")
-                return "4321\n"
+            self.assertNotIn("Start-Process", code)
             self.assertIn("CommandLine.Contains", code)
             self.assertIn(str(s.raw), code)
+            if "Stop-Process" not in code:
+                return "4321\n"
             self.assertIn("Stop-Process -Id $_.ProcessId", code)
             self.assertNotIn("Stop-Process -Name", code)
+            process.poll.return_value = 0
             return '{"stopped_pids":[4321],"verified":true}'
         d.ps = Mock(side_effect=powershell)
         return d, s
@@ -189,15 +245,18 @@ class SamplerTests(unittest.TestCase):
                 try:
                     s.start()
                     self.assertEqual(s.frames[-1]["power_watt"], 100)
-                    launch = d.ps.call_args_list[0].args[0]
-                    self.assertIn("-WindowStyle Hidden", launch)
-                    self.assertIn("--loop-ms=20", launch)
-                    self.assertIn("-PassThru", launch)
+                    s.launch_mock.assert_called_once()
+                    self.assertEqual(s.count, 3)
+                    self.assertEqual(s.pid, 4321)
+                    s.process.wait.assert_not_called()
                 finally:
                     s.close()
             self.assertEqual(d.ps.call_count, 2)
             self.assertTrue(json.loads((Path(tmp) / "power_sampler_cleanup.json").read_text())["verified"])
             self.assertFalse(s.thread.is_alive())
+            s.process.wait.assert_called_once_with(timeout=5)
+            self.assertTrue(s.stdout_handle.closed)
+            self.assertTrue(s.stderr_handle.closed)
 
     def test_invalid_telemetry_stops_without_fake_power(self):
         for value, uuid in (("N/A", UUID), ("0", UUID), ("nan", UUID), ("100", "GPU-WRONG")):
@@ -227,6 +286,38 @@ class SamplerTests(unittest.TestCase):
                 d.ps.side_effect = RuntimeError("Cannot stop owned PID")
                 with self.assertRaisesRegex(RuntimeError, "owned PID"):
                     s.close()
+                s.process.wait.assert_called_once_with(timeout=5)
+                self.assertTrue(s.stderr_handle.closed)
+
+    def test_relay_timeout_rechecks_windows_after_reaping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, s = self.make_sampler(tmp)
+            with patch.object(m, "windows_path", side_effect=str):
+                s.start()
+                s.process.wait.side_effect = [subprocess.TimeoutExpired(["relay"], 5), 0]
+                s.close()
+            s.process.kill.assert_called_once()
+            self.assertEqual(d.ps.call_count, 3)  # PID lookup + two ownership cleanup checks.
+            self.assertTrue(s.cleanup["relay_reaped"])
+            self.assertTrue(s.cleanup["verified"])
+
+    def test_only_two_records_do_not_pass_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, s = self.make_sampler(tmp)
+            launch = s.launch_mock.side_effect
+            def two_records(*args, **kwargs):
+                process = launch(*args, **kwargs)
+                s.raw.write_text("\n".join(s.raw.read_text().splitlines()[:2]) + "\n")
+                return process
+            s.launch_mock.side_effect = two_records
+            s.startup_timeout = .1
+            with patch.object(m, "windows_path", side_effect=str):
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "fewer than 3"):
+                        s.start()
+                finally:
+                    s.close()
+            self.assertEqual(s.count, 2)
 
 
 class AuthorWorkflowTests(unittest.TestCase):
@@ -263,7 +354,8 @@ class AuthorWorkflowTests(unittest.TestCase):
                  patch.object(m, "get_layer_input_tensor", return_value=object()), \
                  patch.object(m, "calculate_sparsity", return_value=.25), \
                  patch.object(m, "PowerMonitor", Monitor), patch.object(m.time, "sleep"), \
-                 patch.object(m.time, "perf_counter", side_effect=lambda: next(times)):
+                 patch.object(m.time, "perf_counter", side_effect=lambda: next(times)), \
+                 self.assertLogs(m.logger, level="INFO") as logs:
                 result = m.profile_model(model, "ViT-Base", "transformer", ["mlp"], [2250], object())
             self.assertEqual(module.call_count, 10)
             self.assertEqual(events[:9], ["set", "read", "sync"] + ["forward"] * 5 + ["sync"])
@@ -278,6 +370,11 @@ class AuthorWorkflowTests(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
             self.assertEqual(rows[0]["cpu_freq"], "")
             self.assertEqual(rows[0]["gpu_uuid"], UUID)
+            messages = "\n".join(logs.output)
+            expected = ["Initial state stabilization complete", "Preparing input tensor",
+                        "[1/1] Profiling:", "Configuration set.", "Measurement successful:", "Sparsity:"]
+            positions = [messages.index(message) for message in expected]
+            self.assertEqual(positions, sorted(positions))
 
     def test_compute_failures_continue_but_control_and_telemetry_failures_stop(self):
         import numpy as np
@@ -358,7 +455,7 @@ class AuthorWorkflowTests(unittest.TestCase):
                 fake_torch = NS(randn=lambda *_: tensor)
                 fake_vision = NS(models=NS(vit_b_16=lambda **_: model,
                     ViT_B_16_Weights=NS(IMAGENET1K_V1="weights")))
-                sampler = NS(start=lambda: None, close=Mock(), error=None)
+                sampler = NS(start=lambda: None, close=Mock(), count=3, error=None)
                 frames = [dict(gpu_freq=2800, utilization_pct=100)] * 3
                 def fail(*_):
                     d.dirty, d.last_target = True, 2250
@@ -438,7 +535,7 @@ class SourceAndFailureTests(unittest.TestCase):
                 fake_vision = NS(models=NS(
                     vit_b_16=lambda **_: NS(cuda=lambda: NS(eval=lambda: object())),
                     ViT_B_16_Weights=NS(IMAGENET1K_V1="weights")))
-                sampler = NS(start=lambda: None, close=lambda: events.append("close"), error=None)
+                sampler = NS(start=lambda: None, close=lambda: events.append("close"), count=3, error=None)
                 frames = [dict(gpu_freq=2800, utilization_pct=100)] * 3
                 def profile(*_):
                     d.dirty, d.last_target = True, 2250
@@ -463,6 +560,81 @@ class SourceAndFailureTests(unittest.TestCase):
                     self.assertEqual(code, 1 if reset_fails else 0)
                 finally:
                     logging.shutdown()
+
+
+@unittest.skipUnless(os.name == "nt", "Real Windows subprocess/CIM test; no GPU required")
+class WindowsProcessTests(unittest.TestCase):
+    """Real persistent child + file I/O + Windows PID cleanup, not a fake Popen."""
+    def setUp(self):
+        logging.basicConfig(level=logging.WARNING, force=True)
+
+    @contextmanager
+    def sampler(self, tmp, mode="samples"):
+        d = device(tmp)
+        d.smi = sys.executable
+        d.powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        s = m.PowerSampler(d)
+        real_popen = subprocess.Popen
+        helper = r'''
+import pathlib, sys, time
+args = sys.argv[1:]
+path = pathlib.Path(next(v.split('=', 1)[1] for v in args if v.startswith('--filename=')))
+uuid = args[args.index('-i') + 1]
+if MODE == 'exit':
+    print('fixture real stderr: access denied', file=sys.stderr, flush=True)
+    sys.exit(7)
+deadline = time.monotonic() + 30
+with path.open('w', encoding='utf-8') as stream:
+    while time.monotonic() < deadline:
+        if MODE == 'samples':
+            stream.write(f'2026/11/11 13:00:00.001, {uuid}, 2250, 13801, 100, 50, 90\n')
+            stream.flush()
+        time.sleep(.02)
+'''.replace("MODE", repr(mode))
+        def launch(argv, **kwargs):
+            if argv[0] == sys.executable:
+                argv = [sys.executable, "-u", "-c", helper, *argv[1:]]
+            return real_popen(argv, **kwargs)
+        original_ps = d.ps
+        # Exercise real CIM/Stop-Process against ONLY this helper's unique output marker.
+        d.ps = lambda code: original_ps(code.replace("nvidia-smi.exe", Path(sys.executable).name))
+        with patch.object(m, "windows_path", side_effect=str), \
+             patch.object(m.subprocess, "Popen", side_effect=launch):
+            try:
+                yield s
+            finally:
+                s.close()
+
+    def test_persistent_process_returns_before_exit_and_cleanup_reaps_it(self):
+        with tempfile.TemporaryDirectory(prefix="vit real process space ") as tmp:
+            with self.sampler(tmp) as sampler:
+                sampler.start()
+                self.assertGreaterEqual(sampler.count, 3)
+                self.assertIsNone(sampler.process.poll())
+                self.assertEqual(sampler.pid, sampler.process.pid)
+            self.assertIsNotNone(sampler.process.poll())
+            self.assertTrue(sampler.cleanup["verified"])
+            self.assertTrue(sampler.cleanup["relay_reaped"])
+            self.assertTrue(sampler.stderr_handle.closed)
+
+    def test_early_exit_reports_real_code_and_stderr(self):
+        with tempfile.TemporaryDirectory(prefix="vit real exit ") as tmp:
+            with self.sampler(tmp, "exit") as sampler:
+                with self.assertRaisesRegex(RuntimeError, "returncode=7.*access denied"):
+                    sampler.start()
+            self.assertTrue(sampler.cleanup["verified"])
+            self.assertEqual(sampler.process.returncode, 7)
+
+    def test_no_data_times_out_and_cleans_live_process_without_pid(self):
+        with tempfile.TemporaryDirectory(prefix="vit real quiet ") as tmp:
+            with self.sampler(tmp, "quiet") as sampler:
+                sampler.startup_timeout = .5
+                with self.assertRaisesRegex(RuntimeError, "fewer than 3 valid records"):
+                    sampler.start()
+                self.assertIsNone(sampler.pid)
+            self.assertTrue(sampler.cleanup["verified"])
+            self.assertTrue(sampler.cleanup["relay_reaped"])
+            self.assertIsNotNone(sampler.process.poll())
 
 
 if __name__ == "__main__":
