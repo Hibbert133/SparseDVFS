@@ -1,15 +1,13 @@
-"""CPU fixtures and real Windows helper processes; no 5090/CUDA/clock/energy acceptance."""
+"""CPU NVML fixtures and real sampling threads; no target GPU acceptance."""
 import ast
-from contextlib import contextmanager
 import csv
 import hashlib
-import importlib
 import io
 import json
 import logging
 import os
 import subprocess
-import sys
+import threading
 from pathlib import Path
 import tempfile
 import time
@@ -29,6 +27,12 @@ def device(out, apply=True):
     result.smi, result.powershell = "nvidia-smi.exe", "powershell.exe"
     result.allow_apply, result.dirty, result.last_target = apply, False, None
     return result
+
+
+def fake_telemetry(**overrides):
+    fields = dict(open=Mock(), close=Mock(), stop_monitors=Mock(return_value=[]), monitors=set())
+    fields.update(overrides)
+    return NS(**fields)
 
 
 class ControlTests(unittest.TestCase):
@@ -126,11 +130,12 @@ class ControlTests(unittest.TestCase):
                 out = Path(tmp) / "run"
                 d = device(out)
                 d.run = Mock()
-                sampler = NS(start=Mock(side_effect=problem), close=Mock(), count=0, error=None)
+                sampler = fake_telemetry(open=Mock(side_effect=problem))
                 report = dict(gpu=dict(rates_mhz=[2250]), windows_admin=True, weights_cached=True)
                 with patch.dict(os.environ), patch.object(m, "NvidiaSMI", return_value=d), \
                      patch.object(m, "preflight", return_value=report), \
-                     patch.object(m, "PowerSampler", return_value=sampler), \
+                     patch.object(m, "check_power_windows", return_value={"windows_passed": 20}), \
+                     patch.object(m, "NvmlReader", return_value=sampler), \
                      patch.object(m, "load_vit") as load:
                     code = m.main(["--apply", "--ack-default-auto", "--out", str(out)])
                 self.assertNotEqual(code, 0)
@@ -168,14 +173,15 @@ class ControlTests(unittest.TestCase):
             d.run = Mock()
             out = Path(tmp) / "new"
             report = dict(gpu=dict(rates_mhz=[2250]), windows_admin=False, weights_cached=False)
-            sampler = NS(start=Mock(), close=Mock(), count=3, error=None)
+            sampler = fake_telemetry()
             with patch.dict(os.environ), patch.object(m, "NvidiaSMI", return_value=d), \
                  patch.object(m, "preflight", return_value=report), \
-                 patch.object(m, "PowerSampler", return_value=sampler) as factory, \
+                     patch.object(m, "check_power_windows", return_value={"windows_passed": 20}), \
+                 patch.object(m, "NvmlReader", return_value=sampler) as factory, \
                  patch.object(m, "load_vit") as model:
                 self.assertEqual(m.main(["--check-only", "--out", str(out)]), 0)
-            factory.assert_called_once_with(d)
-            sampler.start.assert_called_once()
+            factory.assert_called_once_with(UUID, out.resolve())
+            sampler.open.assert_called_once()
             sampler.close.assert_called_once()
             model.assert_not_called()
             d.run.assert_not_called()
@@ -205,121 +211,6 @@ class ControlTests(unittest.TestCase):
             self.assertTrue(d.dirty)
 
 
-class SamplerTests(unittest.TestCase):
-    def setUp(self):
-        logging.basicConfig(level=logging.WARNING, force=True)
-
-    def make_sampler(self, tmp, row_uuid=UUID, power="100"):
-        d = device(tmp)
-        s = m.PowerSampler(d)
-        process = NS(pid=9999, poll=Mock(return_value=None), wait=Mock(return_value=0), kill=Mock())
-        def launch(argv, **kwargs):
-            self.assertEqual(argv[:3], [d.smi, "-i", UUID])
-            self.assertIn("--loop-ms=20", argv)
-            self.assertIn("--filename=" + str(s.raw), argv)
-            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
-            self.assertTrue(hasattr(kwargs["stdout"], "fileno"))
-            self.assertTrue(hasattr(kwargs["stderr"], "fileno"))
-            s.raw.write_text(
-                f"2026/11/11 10:00:00.001, {row_uuid}, 2250, 13801, {power}, 50, 90\n" * 3,
-                encoding="utf-8")
-            return process
-        s.launch_mock = self.enterContext(patch.object(m.subprocess, "Popen", side_effect=launch))
-        def powershell(code):
-            self.assertNotIn("Start-Process", code)
-            self.assertIn("CommandLine.Contains", code)
-            self.assertIn(str(s.raw), code)
-            if "Stop-Process" not in code:
-                return "4321\n"
-            self.assertIn("Stop-Process -Id $_.ProcessId", code)
-            self.assertNotIn("Stop-Process -Name", code)
-            process.poll.return_value = 0
-            return '{"stopped_pids":[4321],"verified":true}'
-        d.ps = Mock(side_effect=powershell)
-        return d, s
-
-    def test_one_loop_process_and_owned_cleanup(self):
-        with tempfile.TemporaryDirectory(prefix="vit space ") as tmp:
-            d, s = self.make_sampler(tmp)
-            with patch.object(m, "windows_path", side_effect=str):
-                try:
-                    s.start()
-                    self.assertEqual(s.frames[-1]["power_watt"], 100)
-                    s.launch_mock.assert_called_once()
-                    self.assertEqual(s.count, 3)
-                    self.assertEqual(s.pid, 4321)
-                    s.process.wait.assert_not_called()
-                finally:
-                    s.close()
-            self.assertEqual(d.ps.call_count, 2)
-            self.assertTrue(json.loads((Path(tmp) / "power_sampler_cleanup.json").read_text())["verified"])
-            self.assertFalse(s.thread.is_alive())
-            s.process.wait.assert_called_once_with(timeout=5)
-            self.assertTrue(s.stdout_handle.closed)
-            self.assertTrue(s.stderr_handle.closed)
-
-    def test_invalid_telemetry_stops_without_fake_power(self):
-        for value, uuid in (("N/A", UUID), ("0", UUID), ("nan", UUID), ("100", "GPU-WRONG")):
-            with self.subTest(value=value, uuid=uuid), tempfile.TemporaryDirectory() as tmp:
-                _, s = self.make_sampler(tmp, uuid, value)
-                with patch.object(m, "windows_path", side_effect=str):
-                    try:
-                        with self.assertRaises(RuntimeError):
-                            s.start()
-                    finally:
-                        s.close()
-                self.assertTrue(s.error)
-
-    def test_no_samples_in_window_is_error(self):
-        fake = NS(check=lambda: None, window=lambda *_: [])
-        with patch.object(m, "SAMPLER", fake):
-            monitor = m.PowerMonitor()
-            monitor.start()
-            with self.assertRaisesRegex(RuntimeError, "No valid board-power"):
-                monitor.stop()
-
-    def test_cleanup_failure_propagates(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            d, s = self.make_sampler(tmp)
-            with patch.object(m, "windows_path", side_effect=str):
-                s.start()
-                d.ps.side_effect = RuntimeError("Cannot stop owned PID")
-                with self.assertRaisesRegex(RuntimeError, "owned PID"):
-                    s.close()
-                s.process.wait.assert_called_once_with(timeout=5)
-                self.assertTrue(s.stderr_handle.closed)
-
-    def test_relay_timeout_rechecks_windows_after_reaping(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            d, s = self.make_sampler(tmp)
-            with patch.object(m, "windows_path", side_effect=str):
-                s.start()
-                s.process.wait.side_effect = [subprocess.TimeoutExpired(["relay"], 5), 0]
-                s.close()
-            s.process.kill.assert_called_once()
-            self.assertEqual(d.ps.call_count, 3)  # PID lookup + two ownership cleanup checks.
-            self.assertTrue(s.cleanup["relay_reaped"])
-            self.assertTrue(s.cleanup["verified"])
-
-    def test_only_two_records_do_not_pass_startup(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            _, s = self.make_sampler(tmp)
-            launch = s.launch_mock.side_effect
-            def two_records(*args, **kwargs):
-                process = launch(*args, **kwargs)
-                s.raw.write_text("\n".join(s.raw.read_text().splitlines()[:2]) + "\n")
-                return process
-            s.launch_mock.side_effect = two_records
-            s.startup_timeout = .1
-            with patch.object(m, "windows_path", side_effect=str):
-                try:
-                    with self.assertRaisesRegex(RuntimeError, "fewer than 3"):
-                        s.start()
-                finally:
-                    s.close()
-            self.assertEqual(s.count, 2)
-
-
 class AuthorWorkflowTests(unittest.TestCase):
     def tearDown(self):
         logging.shutdown()
@@ -336,7 +227,7 @@ class AuthorWorkflowTests(unittest.TestCase):
         class Monitor:
             begin_ns, end_ns = 1, 2
             samples = [dict(sample_index=1)]
-            def __init__(self, sample_interval): self.interval = sample_interval
+            def __init__(self, sample_interval, context): self.interval = sample_interval
             def start(self): events.append("power_start")
             def stop(self): events.append("power_stop"); return 100
         with tempfile.TemporaryDirectory() as tmp:
@@ -349,7 +240,7 @@ class AuthorWorkflowTests(unittest.TestCase):
             d.read = Mock(side_effect=read)
             cuda = NS(cuda=NS(synchronize=lambda: events.append("sync")))
             times = iter(i * .001 for i in range(10))
-            with patch.multiple(m, GPU=d, SAMPLER=NS(check=lambda: None), torch=cuda,
+            with patch.multiple(m, GPU=d, torch=cuda,
                                 np=np, pd=pd, tqdm=lambda **_: Progress()), \
                  patch.object(m, "get_layer_input_tensor", return_value=object()), \
                  patch.object(m, "calculate_sparsity", return_value=.25), \
@@ -379,7 +270,7 @@ class AuthorWorkflowTests(unittest.TestCase):
     def test_compute_failures_continue_but_control_and_telemetry_failures_stop(self):
         import numpy as np
         import pandas as pd
-        for problem in ("warmup", "measurement", "control", "telemetry", "interrupt"):
+        for problem in ("warmup", "measurement", "control", "telemetry", "interrupt", "measurement_interrupt"):
             with self.subTest(problem=problem), tempfile.TemporaryDirectory() as tmp:
                 d = device(tmp)
                 d.set = Mock(side_effect=RuntimeError("denied") if problem == "control" else None)
@@ -388,8 +279,8 @@ class AuthorWorkflowTests(unittest.TestCase):
                 def forward(_):
                     nonlocal calls
                     calls += 1
-                    if calls == (6 if problem == "measurement" else 1):
-                        if problem == "interrupt":
+                    if calls == (6 if problem in ("measurement", "measurement_interrupt") else 1):
+                        if problem in ("interrupt", "measurement_interrupt"):
                             raise KeyboardInterrupt()
                         if problem in ("warmup", "measurement"):
                             raise RuntimeError("layer failed")
@@ -399,7 +290,7 @@ class AuthorWorkflowTests(unittest.TestCase):
                              samples=[dict(sample_index=1)],
                              stop=Mock(side_effect=RuntimeError("sampling failed")
                                        if problem == "telemetry" else None, return_value=100))
-                with patch.multiple(m, GPU=d, SAMPLER=NS(check=lambda: None), np=np, pd=pd,
+                with patch.multiple(m, GPU=d, np=np, pd=pd,
                                     torch=NS(cuda=NS(synchronize=lambda: None)),
                                     tqdm=lambda **_: NS(update=lambda *_: None, close=lambda: None)), \
                      patch.object(m, "get_layer_input_tensor", return_value=object()), \
@@ -413,10 +304,13 @@ class AuthorWorkflowTests(unittest.TestCase):
                         self.assertEqual(result.iloc[0]["requested_gpu_freq"], 2250)
                         self.assertEqual(d.set.call_count, 2)
                     else:
-                        with self.assertRaises(KeyboardInterrupt if problem == "interrupt" else RuntimeError):
+                        with self.assertRaises(KeyboardInterrupt if problem in ("interrupt", "measurement_interrupt") else RuntimeError):
                             m.profile_model(model, "ViT-Base", "transformer",
                                             ["mlp"], [210, 2250], object())
                         self.assertEqual(d.set.call_count, 1)
+                self.assertEqual(monitor.stop.call_count,
+                                 2 if problem == "measurement" else
+                                 1 if problem in ("warmup", "telemetry", "measurement_interrupt") else 0)
                 failures = [json.loads(line) for line in
                             (Path(tmp) / "failures.jsonl").read_text().splitlines()]
                 self.assertEqual(len(failures), 1)
@@ -455,8 +349,8 @@ class AuthorWorkflowTests(unittest.TestCase):
                 fake_torch = NS(randn=lambda *_: tensor)
                 fake_vision = NS(models=NS(vit_b_16=lambda **_: model,
                     ViT_B_16_Weights=NS(IMAGENET1K_V1="weights")))
-                sampler = NS(start=lambda: None, close=Mock(), count=3, error=None)
-                frames = [dict(gpu_freq=2800, utilization_pct=100)] * 3
+                sampler = fake_telemetry()
+                frames = [dict(gpu_freq=2800, workload_context="after_synchronized_forward")] * 3
                 def fail(*_):
                     d.dirty, d.last_target = True, 2250
                     raise problem
@@ -464,8 +358,9 @@ class AuthorWorkflowTests(unittest.TestCase):
                 with patch.dict(os.environ), \
                      patch.multiple(m, torch=fake_torch, torchvision=fake_vision), \
                      patch.object(m, "NvidiaSMI", return_value=d), \
-                     patch.object(m, "PowerSampler", return_value=sampler), \
+                     patch.object(m, "NvmlReader", return_value=sampler), \
                      patch.object(m, "preflight", return_value=report), \
+                     patch.object(m, "check_power_windows", return_value={"windows_passed": 20}), \
                      patch.object(m, "get_all_layers", return_value=["mlp"]), \
                      patch.object(m, "loaded_readbacks", return_value=frames), \
                      patch.object(m, "profile_model", side_effect=fail), \
@@ -504,20 +399,6 @@ class SourceAndFailureTests(unittest.TestCase):
                 m.main(["--check-only", "--out", tmp])
             tool.assert_not_called()
 
-    def test_hung_reader_does_not_skip_windows_cleanup(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            d = device(tmp)
-            s = m.PowerSampler(d)
-            s.marker = str(s.raw)
-            s.cleanup["required"] = True
-            s.thread = NS(join=Mock(), is_alive=lambda: True)
-            d.ps = Mock(return_value='{"verified":true,"stopped_pids":[1]}')
-            with self.assertRaisesRegex(RuntimeError, "thread did not stop"):
-                s.close()
-            d.ps.assert_called_once()
-            self.assertTrue(s.cleanup["verified"])
-            self.assertIn("reader_error", s.cleanup)
-
     def test_normal_restores_before_plots_and_restore_error_prevents_plots(self):
         import pandas as pd
         for reset_fails in (False, True):
@@ -535,8 +416,8 @@ class SourceAndFailureTests(unittest.TestCase):
                 fake_vision = NS(models=NS(
                     vit_b_16=lambda **_: NS(cuda=lambda: NS(eval=lambda: object())),
                     ViT_B_16_Weights=NS(IMAGENET1K_V1="weights")))
-                sampler = NS(start=lambda: None, close=lambda: events.append("close"), count=3, error=None)
-                frames = [dict(gpu_freq=2800, utilization_pct=100)] * 3
+                sampler = fake_telemetry(close=lambda: events.append("close"))
+                frames = [dict(gpu_freq=2800, workload_context="after_synchronized_forward")] * 3
                 def profile(*_):
                     d.dirty, d.last_target = True, 2250
                     events.append("profile")
@@ -546,8 +427,9 @@ class SourceAndFailureTests(unittest.TestCase):
                     with patch.dict(os.environ), \
                          patch.multiple(m, torch=fake_torch, torchvision=fake_vision), \
                          patch.object(m, "NvidiaSMI", return_value=d), \
-                         patch.object(m, "PowerSampler", return_value=sampler), \
+                         patch.object(m, "NvmlReader", return_value=sampler), \
                          patch.object(m, "preflight", return_value=report), \
+                     patch.object(m, "check_power_windows", return_value={"windows_passed": 20}), \
                          patch.object(m, "get_all_layers", return_value=["mlp"]), \
                          patch.object(m, "loaded_readbacks", return_value=frames), \
                          patch.object(m, "profile_model", side_effect=profile), \
@@ -562,79 +444,218 @@ class SourceAndFailureTests(unittest.TestCase):
                     logging.shutdown()
 
 
-@unittest.skipUnless(os.name == "nt", "Real Windows subprocess/CIM test; no GPU required")
-class WindowsProcessTests(unittest.TestCase):
-    """Real persistent child + file I/O + Windows PID cleanup, not a fake Popen."""
+def nvml_fixture(tmp, power_mw=67125, returned_uuid=UUID):
+    def handle(uuid, output):
+        output._obj.value = 1234
+        return 0
+    def uuid(handle, output, length):
+        output.value = returned_uuid.encode("ascii")
+        return 0
+    def power(handle, output):
+        output._obj.value = power_mw
+        return 0
+    def clock(handle, kind, output):
+        output._obj.value = 2527
+        return 0
+    lib = NS(nvmlInit_v2=Mock(return_value=0), nvmlShutdown=Mock(return_value=0),
+             nvmlErrorString=Mock(return_value=b"Not Supported"),
+             nvmlDeviceGetHandleByUUID=Mock(side_effect=handle), nvmlDeviceGetUUID=Mock(side_effect=uuid),
+             nvmlDeviceGetPowerUsage=Mock(side_effect=power), nvmlDeviceGetClockInfo=Mock(side_effect=clock))
+    reader = m.NvmlReader(UUID, tmp)
+    return reader, lib
+
+
+class NvmlTests(unittest.TestCase):
     def setUp(self):
         logging.basicConfig(level=logging.WARNING, force=True)
 
-    @contextmanager
-    def sampler(self, tmp, mode="samples"):
-        d = device(tmp)
-        d.smi = sys.executable
-        d.powershell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-        s = m.PowerSampler(d)
-        real_popen = subprocess.Popen
-        helper = r'''
-import pathlib, sys, time
-args = sys.argv[1:]
-path = pathlib.Path(next(v.split('=', 1)[1] for v in args if v.startswith('--filename=')))
-uuid = args[args.index('-i') + 1]
-if MODE == 'exit':
-    print('fixture real stderr: access denied', file=sys.stderr, flush=True)
-    sys.exit(7)
-deadline = time.monotonic() + 30
-with path.open('w', encoding='utf-8') as stream:
-    while time.monotonic() < deadline:
-        if MODE == 'samples':
-            stream.write(f'2026/11/11 13:00:00.001, {uuid}, 2250, 13801, 100, 50, 90\n')
-            stream.flush()
-        time.sleep(.02)
-'''.replace("MODE", repr(mode))
-        def launch(argv, **kwargs):
-            if argv[0] == sys.executable:
-                argv = [sys.executable, "-u", "-c", helper, *argv[1:]]
-            return real_popen(argv, **kwargs)
-        original_ps = d.ps
-        # Exercise real CIM/Stop-Process against ONLY this helper's unique output marker.
-        d.ps = lambda code: original_ps(code.replace("nvidia-smi.exe", Path(sys.executable).name))
-        with patch.object(m, "windows_path", side_effect=str), \
-             patch.object(m.subprocess, "Popen", side_effect=launch):
+    def test_uuid_units_timestamps_and_single_initialization_shutdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, lib = nvml_fixture(tmp)
+            with patch.object(m.ctypes, "CDLL", return_value=lib) as load:
+                reader.open()
+                for _ in range(3):
+                    frame = reader.read_power()
+                    self.assertEqual(frame["power_watt"], 67.125)
+                    self.assertLessEqual(frame["query_begin_monotonic_ns"], frame["query_end_monotonic_ns"])
+                self.assertEqual(reader.read_clock()["gpu_freq"], 2527)
+                reader.close()
+                reader.close()
+            load.assert_called_once_with("/usr/lib/wsl/lib/libnvidia-ml.so.1")
+            lib.nvmlInit_v2.assert_called_once()
+            lib.nvmlShutdown.assert_called_once()
+            self.assertEqual(lib.nvmlDeviceGetHandleByUUID.call_args.args[0], UUID.encode("ascii"))
+
+    def test_mismatch_and_query_errors_never_become_fake_power(self):
+        for problem in ("uuid", "zero", "unsupported"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as tmp:
+                reader, lib = nvml_fixture(tmp, power_mw=0 if problem == "zero" else 67125,
+                                           returned_uuid="GPU-WRONG" if problem == "uuid" else UUID)
+                if problem == "unsupported":
+                    lib.nvmlDeviceGetPowerUsage.side_effect = None
+                    lib.nvmlDeviceGetPowerUsage.return_value = 3
+                with patch.object(m.ctypes, "CDLL", return_value=lib):
+                    try:
+                        with self.assertRaises(RuntimeError):
+                            reader.open()
+                            reader.read_power()
+                    finally:
+                        reader.close()
+                lib.nvmlShutdown.assert_called_once()
+
+    def test_missing_library_has_no_command_or_backend_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader = m.NvmlReader(UUID, tmp)
+            with patch.object(m.ctypes, "CDLL", side_effect=OSError("missing WSL NVML")), \
+                 patch.object(m.subprocess, "run") as command:
+                with self.assertRaisesRegex(OSError, "missing WSL"):
+                    reader.open()
+                reader.close()
+            command.assert_not_called()
+
+    def test_shutdown_error_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, lib = nvml_fixture(tmp)
+            with patch.object(m.ctypes, "CDLL", return_value=lib):
+                reader.open()
+            lib.nvmlShutdown.return_value = 3
+            with self.assertRaisesRegex(RuntimeError, "nvmlShutdown"):
+                reader.close()
+            self.assertFalse(json.loads((Path(tmp) / "power_sampler_cleanup.json").read_text())["verified"])
+
+
+class ThreadSamplingTests(unittest.TestCase):
+    def setUp(self):
+        logging.basicConfig(level=logging.WARNING, force=True)
+        import numpy as np
+        self.enterContext(patch.object(m, "np", np))
+
+    def reader(self, tmp):
+        reader, lib = nvml_fixture(tmp)
+        with patch.object(m.ctypes, "CDLL", return_value=lib):
+            reader.open()
+        return reader, lib
+
+    def test_twenty_real_short_windows_no_subprocess_or_file_tailing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, lib = self.reader(tmp)
+            with patch.object(m.subprocess, "Popen", side_effect=AssertionError("No sampling subprocess")):
+                report = m.check_power_windows(reader)
+            self.assertEqual(report["windows_passed"], 20)
+            self.assertEqual(len(report["window_sample_counts"]), 20)
+            self.assertTrue(all(n > 0 for n in report["window_sample_counts"]))
+            self.assertEqual(reader.monitors, set())
+            windows = [json.loads(s) for s in (Path(tmp) / "measurement_windows.jsonl").read_text().splitlines()]
+            self.assertEqual(len(windows), 20)
+            self.assertTrue(all(w["thread_joined"] and w["error"] is None for w in windows))
+            reader.close()
+
+    def test_delayed_file_save_does_not_shift_or_feed_sampling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, _ = self.reader(tmp)
+            monitor = m.PowerMonitor(telemetry=reader)
+            monitor.start()
+            time.sleep(.1)
+            self.assertFalse((Path(tmp) / "power_samples.csv").exists())
+            self.assertGreater(len(monitor.samples), 0)
+            original = monitor.save
+            def slow_save():
+                self.assertFalse(monitor.is_alive())
+                count = len(monitor.samples)
+                time.sleep(.15)
+                self.assertEqual(len(monitor.samples), count)
+                original()
+            with patch.object(monitor, "save", side_effect=slow_save):
+                self.assertAlmostEqual(monitor.stop(), 67.125)
+            self.assertLess(monitor.end_ns - monitor.begin_ns, 200_000_000)
+            self.assertTrue((Path(tmp) / "power_samples.csv").exists())
+            reader.close()
+
+    def test_stop_keeps_query_already_in_flight_with_honest_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, lib = self.reader(tmp)
+            entered, release = threading.Event(), threading.Event()
+            original = lib.nvmlDeviceGetPowerUsage.side_effect
+            def slow_query(*args):
+                entered.set()
+                if not release.wait(2):
+                    raise RuntimeError("test release missing")
+                return original(*args)
+            lib.nvmlDeviceGetPowerUsage.side_effect = slow_query
+            monitor = m.PowerMonitor(telemetry=reader)
+            monitor.start()
+            self.assertTrue(entered.wait(1))
+            def unblock():
+                monitor._stop_event.wait(1)
+                release.set()
+            helper = threading.Thread(target=unblock)
+            helper.start()
             try:
-                yield s
+                self.assertAlmostEqual(monitor.stop(), 67.125)
             finally:
-                s.close()
+                release.set()
+                helper.join(1)
+            self.assertEqual(len(monitor.samples), 1)
+            self.assertLessEqual(monitor.samples[0]["query_begin_monotonic_ns"], monitor.end_ns)
+            self.assertGreaterEqual(monitor.samples[0]["query_end_monotonic_ns"], monitor.end_ns)
+            reader.close()
 
-    def test_persistent_process_returns_before_exit_and_cleanup_reaps_it(self):
-        with tempfile.TemporaryDirectory(prefix="vit real process space ") as tmp:
-            with self.sampler(tmp) as sampler:
-                sampler.start()
-                self.assertGreaterEqual(sampler.count, 3)
-                self.assertIsNone(sampler.process.poll())
-                self.assertEqual(sampler.pid, sampler.process.pid)
-            self.assertIsNotNone(sampler.process.poll())
-            self.assertTrue(sampler.cleanup["verified"])
-            self.assertTrue(sampler.cleanup["relay_reaped"])
-            self.assertTrue(sampler.stderr_handle.closed)
+    def test_query_error_and_zero_sample_windows_are_saved(self):
+        for query_fails in (True, False):
+            with self.subTest(query_fails=query_fails), tempfile.TemporaryDirectory() as tmp:
+                reader, lib = self.reader(tmp)
+                monitor = m.PowerMonitor(telemetry=reader, context=dict(layer_name="mlp"))
+                if query_fails:
+                    lib.nvmlDeviceGetPowerUsage.side_effect = RuntimeError("native query failed")
+                    monitor.start()
+                else:
+                    # Model an empty window without inventing a power sample.
+                    monitor.begin_ns = time.monotonic_ns()
+                with self.assertRaisesRegex(RuntimeError, "native query failed|No valid board-power"):
+                    monitor.stop()
+                window = json.loads((Path(tmp) / "measurement_windows.jsonl").read_text())
+                self.assertEqual(window["sample_count"], 0)
+                self.assertTrue(window["error"])
+                self.assertIsNotNone(window["begin_monotonic_ns"])
+                self.assertTrue(window["thread_joined"])
+                reader.close()
 
-    def test_early_exit_reports_real_code_and_stderr(self):
-        with tempfile.TemporaryDirectory(prefix="vit real exit ") as tmp:
-            with self.sampler(tmp, "exit") as sampler:
-                with self.assertRaisesRegex(RuntimeError, "returncode=7.*access denied"):
-                    sampler.start()
-            self.assertTrue(sampler.cleanup["verified"])
-            self.assertEqual(sampler.process.returncode, 7)
+    def test_hung_thread_skips_shutdown_but_does_not_skip_gpu_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reader, lib = self.reader(tmp)
+            monitor = m.PowerMonitor(telemetry=reader)
+            monitor.begin_ns = time.monotonic_ns()
+            monitor._thread = NS(ident=1, join=Mock(), is_alive=lambda: True)
+            reader.monitors.add(monitor)
+            d = device(tmp)
+            d.dirty, d.last_target = True, 180
+            d.run = Mock(return_value="")
+            d.read = Mock(return_value=dict(gpu_freq=2527))
+            with patch.object(m.time, "sleep"):
+                result = m.restore(d, object(), object(), reader, [])
+            d.run.assert_called_once_with("-rgc")
+            self.assertEqual(result["readbacks_skipped"], "power_query_still_running")
+            with self.assertRaisesRegex(RuntimeError, "Shutdown skipped"):
+                reader.close()
+            monitor._thread.join.assert_called_with(timeout=2)
+            lib.nvmlShutdown.assert_not_called()
+            # Release the fixture after asserting the non-concurrent shutdown contract.
+            monitor._thread.is_alive = lambda: False
+            reader.monitors.clear()
+            reader.close()
 
-    def test_no_data_times_out_and_cleans_live_process_without_pid(self):
-        with tempfile.TemporaryDirectory(prefix="vit real quiet ") as tmp:
-            with self.sampler(tmp, "quiet") as sampler:
-                sampler.startup_timeout = .5
-                with self.assertRaisesRegex(RuntimeError, "fewer than 3 valid records"):
-                    sampler.start()
-                self.assertIsNone(sampler.pid)
-            self.assertTrue(sampler.cleanup["verified"])
-            self.assertTrue(sampler.cleanup["relay_reaped"])
-            self.assertIsNotNone(sampler.process.poll())
+    def test_loaded_readbacks_follow_synchronized_forward_without_utilization_filter(self):
+        events = []
+        def clock():
+            events.append("clock")
+            return dict(gpu_freq=2527)
+        fake = NS(read_clock=clock)
+        with patch.object(m, "torch", NS(no_grad=lambda: __import__('contextlib').nullcontext(),
+                                         cuda=NS(synchronize=lambda: events.append("sync")))), \
+             patch.object(m.time, "monotonic", side_effect=[0, 0, .5, 1]):
+            frames = m.loaded_readbacks(lambda _: events.append("forward"), object(), fake)
+        self.assertEqual(events, ["forward", "sync", "clock"] * 2)
+        self.assertTrue(all(f["workload_context"] == "after_synchronized_forward" for f in frames))
 
 
 if __name__ == "__main__":
