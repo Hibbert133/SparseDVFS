@@ -250,8 +250,12 @@ class AuthorWorkflowTests(unittest.TestCase):
             def stop(self): events.append("power_stop"); return 100
         with tempfile.TemporaryDirectory() as tmp:
             d = device(tmp)
-            d.set = Mock()
-            d.read = Mock(return_value=dict(uuid=UUID, gpu_freq=2250, memory_freq=13801))
+            d.set = Mock(side_effect=lambda _: events.append("set"))
+            # A pre-warmup idle clock must not filter the requested candidate.
+            def read():
+                events.append("read")
+                return dict(uuid=UUID, gpu_freq=210, memory_freq=13801)
+            d.read = Mock(side_effect=read)
             cuda = NS(cuda=NS(synchronize=lambda: events.append("sync")))
             times = iter(i * .001 for i in range(10))
             with patch.multiple(m, GPU=d, SAMPLER=NS(check=lambda: None), torch=cuda,
@@ -262,15 +266,85 @@ class AuthorWorkflowTests(unittest.TestCase):
                  patch.object(m.time, "perf_counter", side_effect=lambda: next(times)):
                 result = m.profile_model(model, "ViT-Base", "transformer", ["mlp"], [2250], object())
             self.assertEqual(module.call_count, 10)
-            self.assertEqual(events[:7], ["sync"] + ["forward"] * 5 + ["sync"])
+            self.assertEqual(events[:9], ["set", "read", "sync"] + ["forward"] * 5 + ["sync"])
             self.assertEqual(events.count("sync"), 7)
-            self.assertEqual(events[7], "power_start")
+            self.assertEqual(events[9], "power_start")
+            d.read.assert_called_once()
+            self.assertEqual(result.iloc[0]["gpu_freq"], 210)
+            self.assertEqual(result.iloc[0]["requested_gpu_freq"], 2250)
             self.assertAlmostEqual(result.iloc[0]["latency_ms"], 1)
             self.assertAlmostEqual(result.iloc[0]["energy_joule"], .1)
             with (Path(tmp) / "profiling_results_ViT-Base.csv").open(encoding="utf-8") as stream:
                 rows = list(csv.DictReader(stream))
             self.assertEqual(rows[0]["cpu_freq"], "")
             self.assertEqual(rows[0]["gpu_uuid"], UUID)
+
+    def test_compute_failures_continue_but_control_and_telemetry_failures_stop(self):
+        import numpy as np
+        import pandas as pd
+        for problem in ("warmup", "measurement", "control", "telemetry", "interrupt"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as tmp:
+                d = device(tmp)
+                d.set = Mock(side_effect=RuntimeError("denied") if problem == "control" else None)
+                d.read = Mock(return_value=dict(gpu_freq=210, memory_freq=13801))
+                calls = 0
+                def forward(_):
+                    nonlocal calls
+                    calls += 1
+                    if calls == (6 if problem == "measurement" else 1):
+                        if problem == "interrupt":
+                            raise KeyboardInterrupt()
+                        if problem in ("warmup", "measurement"):
+                            raise RuntimeError("layer failed")
+                    return object()
+                model = NS(named_modules=lambda: [("mlp", forward)])
+                monitor = NS(start=lambda: None, begin_ns=1, end_ns=2,
+                             samples=[dict(sample_index=1)],
+                             stop=Mock(side_effect=RuntimeError("sampling failed")
+                                       if problem == "telemetry" else None, return_value=100))
+                with patch.multiple(m, GPU=d, SAMPLER=NS(check=lambda: None), np=np, pd=pd,
+                                    torch=NS(cuda=NS(synchronize=lambda: None)),
+                                    tqdm=lambda **_: NS(update=lambda *_: None, close=lambda: None)), \
+                     patch.object(m, "get_layer_input_tensor", return_value=object()), \
+                     patch.object(m, "calculate_sparsity", return_value=.25), \
+                     patch.object(m, "PowerMonitor", return_value=monitor), \
+                     patch.object(m.time, "sleep"):
+                    if problem in ("warmup", "measurement"):
+                        result = m.profile_model(model, "ViT-Base", "transformer",
+                                                 ["mlp"], [210, 2250], object())
+                        self.assertEqual(len(result), 1)
+                        self.assertEqual(result.iloc[0]["requested_gpu_freq"], 2250)
+                        self.assertEqual(d.set.call_count, 2)
+                    else:
+                        with self.assertRaises(KeyboardInterrupt if problem == "interrupt" else RuntimeError):
+                            m.profile_model(model, "ViT-Base", "transformer",
+                                            ["mlp"], [210, 2250], object())
+                        self.assertEqual(d.set.call_count, 1)
+                failures = [json.loads(line) for line in
+                            (Path(tmp) / "failures.jsonl").read_text().splitlines()]
+                self.assertEqual(len(failures), 1)
+
+    def test_author_vit_fallback_only_after_primary_failure(self):
+        model = NS(cuda=lambda: NS(eval=lambda: "vit"))
+        for primary_fails, fallback_fails in ((False, False), (True, False), (True, True)):
+            with self.subTest(primary=primary_fails, fallback=fallback_fails):
+                primary = Mock(return_value=model,
+                               side_effect=RuntimeError("primary failed") if primary_fails else None)
+                hub = Mock(return_value=model,
+                           side_effect=RuntimeError("hub failed") if fallback_fails else None)
+                with patch.multiple(m, torch=NS(hub=NS(load=hub)),
+                                    torchvision=NS(models=NS(vit_b_16=primary,
+                                        ViT_B_16_Weights=NS(IMAGENET1K_V1="weights")))):
+                    if fallback_fails:
+                        with self.assertRaisesRegex(RuntimeError, "hub failed"):
+                            m.load_vit()
+                    else:
+                        self.assertEqual(m.load_vit(), "vit")
+                primary.assert_called_once_with(weights="weights")
+                if primary_fails:
+                    hub.assert_called_once_with('pytorch/vision:v0.10.0', 'vit_b_16', pretrained=True)
+                else:
+                    hub.assert_not_called()
 
     def test_main_exception_or_interrupt_restores_and_cleans_sampler(self):
         for problem in (RuntimeError("injected failure"), KeyboardInterrupt(), SystemExit(143)):

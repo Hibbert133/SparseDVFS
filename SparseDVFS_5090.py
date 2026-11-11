@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author ViT profiler, with only the hardware interface adapted for RTX 5090.
+"""Author ViT profiler with RTX 5090 hardware control and exit recovery.
 
 Upstream: https://github.com/ziyangzhang96/SparseDVFS/blob/
 c524c51aac552fd16bec5743b1fb95309b46347b/SparseDVFS.py
@@ -12,7 +12,7 @@ WSL Bash, in the existing Conda environment:
 Launch WSL from a Windows administrator terminal for real clock writes.
 There is no bridge, socket, Windows Python, pynvml, or project-package import.
 The Windows driver tools nvidia-smi.exe and powershell.exe must be accessible.
-PowerShell only launches/stops this run's one hidden nvidia-smi sampling process.
+PowerShell checks Windows privilege and manages this run's hidden sampler.
 
 Preserved: torchvision vit_b_16 IMAGENET1K_V1, default precision, random
 (1,3,224,224), author layer selection/input hooks/gradient scopes, five warmups,
@@ -43,7 +43,7 @@ import time
 
 SOURCE_COMMIT = "c524c51aac552fd16bec5743b1fb95309b46347b"
 DEFAULT_UUID = "GPU-22d1cd22-d198-45c4-2b54-974484026ab5"
-CLOCK_TOLERANCE_MHZ = 15
+RESTORE_TOLERANCE_MHZ = 15
 logger = logging.getLogger("SparseDVFS_5090")
 # Imported only by main, after selecting the UUID and parsing --help.
 torch = torchvision = np = pd = plt = sns = tqdm = None
@@ -173,7 +173,7 @@ class NvidiaSMI:
             raise RuntimeError("Driver reported no clock candidates; no invented grid.")
         return dict(**identity, rates_mhz=rates, by_memory_mhz=by_memory,
                     cpu_policy="system-managed", memory_policy="system-managed",
-                    clock_grid_basis="union_of_reported_candidates_requires_loaded_readback",
+                    clock_grid_basis="union_of_reported_candidates_not_verified_under_load",
                     set_reset_verified=False, physical_restore_verified=False)
 
     def set(self, mhz):
@@ -429,48 +429,65 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
     pbar = tqdm(total=total_combinations, desc=f"Profiling {model_name}")
     try:
         for layer_name in target_layers:
-            layer_input = get_layer_input_tensor(model, layer_name, input_tensor)
+            try:
+                layer_input = get_layer_input_tensor(model, layer_name, input_tensor)
+            except Exception as exc:
+                logger.error("Error getting input tensor: %s", exc)
+                append_jsonl(GPU.out / "failures.jsonl",
+                             dict(layer_name=layer_name, status="input_capture_failed",
+                                  error=str(exc), error_type=type(exc).__name__))
+                pbar.update(len(frequency_combinations))
+                continue
             if layer_input is None:
                 append_jsonl(GPU.out / "failures.jsonl",
                              dict(layer_name=layer_name, status="input_capture_failed"))
                 pbar.update(len(frequency_combinations))
                 continue
             target_module = dict(model.named_modules()).get(layer_name)
+            if target_module is None:
+                logger.warning("Layer '%s' not found, skipping", layer_name)
+                append_jsonl(GPU.out / "failures.jsonl",
+                             dict(layer_name=layer_name, status="layer_not_found"))
+                pbar.update(len(frequency_combinations))
+                continue
             for gpu_freq in frequency_combinations:
                 context = dict(layer_name=layer_name, requested_gpu_freq=gpu_freq)
+                stage = "control"
                 try:
                     SAMPLER.check()
                     GPU.set(gpu_freq)
                     time.sleep(0.5)  # Author additional stabilization.
+                    actual = GPU.read()  # Author reads before synchronization/warmup.
+                    append_jsonl(GPU.out / "clock_readbacks.jsonl", dict(**context, **actual))
+                    logger.info("Configuration set. GPU target/actual=%s/%s MHz, memory=%s MHz",
+                                gpu_freq, actual["gpu_freq"], actual["memory_freq"])
+                    stage = "compute"
                     torch.cuda.synchronize()
                     # Keep the author's gradient scopes, warmup count and timing.
                     warmup_runs = 5
                     for _ in range(warmup_runs):
                         _ = target_module(layer_input)
                     torch.cuda.synchronize()
-                    actual = GPU.read()  # Read after warmup, outside the timed calls.
-                    append_jsonl(GPU.out / "clock_readbacks.jsonl", dict(**context, **actual))
-                    if abs(actual["gpu_freq"] - gpu_freq) > CLOCK_TOLERANCE_MHZ:
-                        append_jsonl(GPU.out / "failures.jsonl",
-                                     dict(**context, status="clock_mismatch", readback=actual))
-                        logger.warning("Skipping %s at %s MHz: read back %s MHz",
-                                       layer_name, gpu_freq, actual["gpu_freq"])
-                        continue
                     min_profile_runs = 5
                     latencies = []
+                    stage = "telemetry"
                     power_monitor = PowerMonitor(sample_interval=0.02)
                     power_monitor.start()
                     time.sleep(0.1)  # Author monitor startup delay.
+                    stage = "compute"
                     for _ in range(min_profile_runs):
                         iter_start = time.perf_counter()
                         output_tensor = target_module(layer_input)
                         torch.cuda.synchronize()
                         iter_end = time.perf_counter()
                         latencies.append(iter_end - iter_start)
+                    stage = "telemetry"
                     avg_power_w = power_monitor.stop()
+                    stage = "compute"
                     latency_s = np.mean(latencies)
                     energy_j = avg_power_w * latency_s
                     sparsity = calculate_sparsity(output_tensor)
+                    stage = "output"
                     samples = power_monitor.samples
                     row = dict(model=model_name, model_type=model_type, layer_name=layer_name,
                                cpu_freq=None, gpu_freq=actual["gpu_freq"],
@@ -502,8 +519,11 @@ def profile_model(model, model_name, model_type, target_layers, frequency_combin
                 except BaseException as exc:
                     append_jsonl(GPU.out / "failures.jsonl",
                                  dict(**context, status="failed", error=str(exc),
-                                      error_type=type(exc).__name__))
-                    raise  # Control/telemetry errors stop; no silent downgrade or retry.
+                                      error_type=type(exc).__name__, stage=stage))
+                    if stage == "compute" and isinstance(exc, Exception):
+                        logger.error("  > Profiling failed: %s", exc)
+                        continue  # Author skips failed layer/frequency computations.
+                    raise  # Control/telemetry/output failures and interrupts stop.
                 finally:
                     pbar.update(1)
     finally:
@@ -758,9 +778,9 @@ def restore(device, model, input_tensor, sampler, baseline):
             # Idle downclock or a successful -rgc alone is not unlock evidence.
             result["physical_restore_verified"] = bool(
                 len(before) >= 3 and len(loaded) >= 3
-                and sum(v > device.last_target + CLOCK_TOLERANCE_MHZ for v in loaded) >= 3
-                and any(min(before) - CLOCK_TOLERANCE_MHZ <= v
-                        <= max(before) + CLOCK_TOLERANCE_MHZ for v in loaded))
+                and sum(v > device.last_target + RESTORE_TOLERANCE_MHZ for v in loaded) >= 3
+                and any(min(before) - RESTORE_TOLERANCE_MHZ <= v
+                        <= max(before) + RESTORE_TOLERANCE_MHZ for v in loaded))
             result["verification_basis"] = (
                 "loaded_readbacks_above_previous_lock_ceiling_and_within_baseline_range;"
                 "not_an_independent_PLL_measurement")
@@ -790,6 +810,22 @@ def parse_args(argv=None):
 
 def _termination(signum, frame):
     raise SystemExit(128 + signum)
+
+
+def load_vit():
+    """Author primary pretrained model and original Torch Hub fallback."""
+    try:
+        return torchvision.models.vit_b_16(
+            weights=torchvision.models.ViT_B_16_Weights.IMAGENET1K_V1).cuda().eval()
+    except Exception as exc:
+        logger.error("ViT loading failed: %s", exc)
+        logger.info("Attempting to load ViT from PyTorch Hub...")
+        try:
+            return torch.hub.load('pytorch/vision:v0.10.0', 'vit_b_16',
+                                  pretrained=True).cuda().eval()
+        except Exception as fallback_exc:
+            logger.error("ViT loading from PyTorch Hub failed: %s", fallback_exc)
+            raise
 
 
 def main(argv=None):
@@ -828,8 +864,7 @@ def main(argv=None):
                                    "as administrator, enter WSL and reuse this environment. "
                                    "WSL sudo does not elevate Windows.")
             input_tensor = torch.randn(1, 3, 224, 224).cuda()
-            model = torchvision.models.vit_b_16(
-                weights=torchvision.models.ViT_B_16_Weights.IMAGENET1K_V1).cuda().eval()
+            model = load_vit()
             target_layers = get_all_layers(model, "transformer")
             if not target_layers:
                 raise RuntimeError("Author selection produced no ViT target layers")
