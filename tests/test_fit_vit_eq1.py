@@ -7,9 +7,25 @@ import unittest
 import numpy as np
 
 import fit_vit_eq1 as fit
+import fit_vit_eq1_fast as fast
 
 
 class Eq1FitTests(unittest.TestCase):
+    def test_relative_line_matches_scaled_least_squares(self):
+        x = np.array([0.1, 0.2, 0.4, 0.75])
+        y = np.array([0.3, 0.6, 1.0, 1.2])
+        weights = 1 / y**2
+        expected = np.linalg.lstsq(np.column_stack([np.ones_like(x), x]) / y[:, None],
+                                   np.ones_like(y), rcond=None)[0]
+        np.testing.assert_allclose(fit.nonnegative_line(x, y, weights/weights.sum()), expected)
+
+    def test_scale_includes_one_and_maximizes_interval_overlap(self):
+        y = np.ones(5)
+        self.assertEqual(fast.calibrated_scale(y, y), 1.)
+        pred = np.array([2., 2., 2., 1., 1.])
+        scale = fast.calibrated_scale(pred, y)
+        self.assertEqual(fast.hit_mask(scale*pred, y).sum(), 3)
+
     def test_two_branches(self):
         f = np.arange(100., 3100., 10.)
         y = 0.07 + np.maximum(200 / f, 0.2)
@@ -35,10 +51,14 @@ class Eq1FitTests(unittest.TestCase):
                         y = 0.1 + max(150 / f, 0.1) + (offset if i % 5 == 2 else 0)
                         writer.writerow(["GPU-A", "mlp", f, y])
                 rows, _, summary = fit.analyze(p)
+                fast_rows, _, report = fast.compare(p)
+                self.assertEqual(report["held_out"], 78)
+                self.assertEqual(report["new_hits"] - report["old_hits"], report["gained"] - report["lost"])
                 self.assertEqual(json.loads(json.dumps(summary)), summary)
                 self.assertEqual((rows[0]["train_count"], summary["held_out_cells"]), (311, 78))
-                return rows[0]
-            first, second = run(0), run(1)
+                return rows[0], fast_rows[0]
+            (first, first_fast), (second, second_fast) = run(0), run(1)
+            self.assertEqual(first_fast, second_fast)
             for key in ("intercept_ms", "C_ms_MHz", "M_ms", "knee_MHz", "knee_support"):
                 self.assertEqual(first[key], second[key])
             self.assertGreater(second["eq1_WAPE_pct"], first["eq1_WAPE_pct"])

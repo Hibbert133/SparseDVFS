@@ -23,30 +23,44 @@ class Curve:
         return self.intercept + self.slope * x
 
 
-def nonnegative_line(x, y):
+def nonnegative_line(x, y, weights=None):
     # Solve the two-variable constrained least-squares problem, including both edges.
-    xc = x - x.mean()
-    slope = np.dot(xc, y - y.mean()) / np.dot(xc, xc)
-    intercept = y.mean() - slope * x.mean()
+    if weights is None:
+        xm, ym = x.mean(), y.mean()
+        wx = x
+        centered = x - xm
+    else:
+        xm, ym = np.dot(weights, x), np.dot(weights, y)
+        wx = weights * x
+        centered = weights * (x - xm)
+    slope = np.dot(centered, y - ym) / np.dot(centered, x - xm)
+    intercept = ym - slope * xm
     if slope <= 0:
-        return float(y.mean()), 0.0
+        return float(ym), 0.0
     if intercept < 0:
-        return 0.0, float(np.dot(x, y) / np.dot(x, x))
+        return 0.0, float(np.dot(wx, y) / np.dot(wx, x))
     return float(intercept), float(slope)
 
 
-def fit_curves(freq, latency):
+def fit_curves(freq, latency, relative=False):
     # freq contains distinct values in ascending order. Both one-branch limits
     # are included in the reciprocal fit (a zero slope gives the constant fit).
     x = 1.0 / freq
-    reciprocal = Curve(*nonnegative_line(x, latency))
+    weights = None
+    if relative:
+        weights = (latency.min() / latency) ** 2
+        weights /= weights.sum()
+    def loss(residual):
+        squared = residual ** 2
+        return np.sum(squared) if weights is None else np.dot(weights, squared)
+    reciprocal = Curve(*nonnegative_line(x, latency, weights))
     best = reciprocal
-    best_sse = np.sum((best.predict(freq) - latency) ** 2)
-    tolerance = np.finfo(float).eps * np.dot(latency, latency) * 16
+    best_sse = loss(best.predict(freq) - latency)
+    tolerance = np.finfo(float).eps * loss(latency) * 16
     for knee in freq[1:-1]:
         feature = np.maximum(x, 1.0 / knee)
-        intercept, slope = nonnegative_line(feature, latency)
-        sse = np.sum((intercept + slope * feature - latency) ** 2)
+        intercept, slope = nonnegative_line(feature, latency, weights)
+        sse = loss(intercept + slope * feature - latency)
         if sse < best_sse - tolerance:
             best = Curve(intercept, slope, float(knee))
             best_sse = sse
@@ -110,19 +124,24 @@ def write_csv(path, records):
         writer.writerows(records)
 
 
-def analyze(path):
-    cells, uuid = load_cells(path)
+def split_cells(cells):
     freq_grid = sorted({f for layer in cells.values() for f in layer})
     held_out = set(freq_grid[2::5])
-    rows, predictions = [], []
-    total_error = np.zeros(3)
-    total_time = 0.0
     for layer, by_freq in cells.items():
         freq = np.array(sorted(by_freq))
         latency = np.array([np.mean(by_freq[f]) for f in freq])
         test = np.array([f in held_out for f in freq])
         if not test.any() or (~test).sum() < 2:
             raise ValueError(f"{layer}: insufficient training or held-out frequencies")
+        yield layer, freq, latency, test
+
+
+def analyze(path):
+    cells, uuid = load_cells(path)
+    rows, predictions = [], []
+    total_error = np.zeros(3)
+    total_time = 0.0
+    for layer, freq, latency, test in split_cells(cells):
         train_f, train_y = freq[~test], latency[~test]
         best, reciprocal = fit_curves(train_f, train_y)
         support, split_knees = assess_knee(best, train_f, train_y)
@@ -142,7 +161,7 @@ def analyze(path):
             predictions.append(dict(layer_name=layer, requested_gpu_freq=f, measured_ms=observed,
                                     eq1_ms=eq1, reciprocal_ms=rec, constant_ms=const))
     metrics = 100 * total_error / total_time
-    report = dict(gpu_uuid=uuid, layers=len(rows), frequencies=len(freq_grid),
+    report = dict(gpu_uuid=uuid, layers=len(rows), frequencies=len({f for layer in cells.values() for f in layer}),
                   cells=sum(map(len, cells.values())), held_out_cells=len(predictions),
                   eq1_WAPE_pct=float(metrics[0]), reciprocal_WAPE_pct=float(metrics[1]),
                   constant_WAPE_pct=float(metrics[2]),
