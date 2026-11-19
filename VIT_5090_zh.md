@@ -127,6 +127,8 @@ python fit_vit_eq1.py runs/vit5090-20261111T064307-262118Z-55460/profiling_resul
 
 将相同命令中的脚本名换为 `fit_vit_af.py`。频率使用请求 MHz，输出单位 ms，逐层以 f 与 1/f 为两列做无截距回归。系数 a 和 c 的单位分别为 ms/MHz 和 ms·MHz。结果同时给出普通最小二乘（ols）、相对平方误差加训练集内三折尺度校准（calibrated）、同口径校准的公式（1）基线。每次在原始 CSV 旁创建 `fit-af-*` 目录；`models.csv` 中 calibrated 的系数已经含尺度。系数允许正负，`positive_on_sweep` 标明整个采集频段预测是否为正，所有留出点都纳入指标统计。
 
+加入 `--intercept` 即拟合三参数曲线 `T_ms = a*f_MHz + b + c/f_MHz`。例如 `python fit_vit_af.py --intercept runs/vit5090-20261111T064307-262118Z-55460/profiling_results_ViT-Base.csv`。频点划分、公式（1）对照和校准方式与上轮相同。`fit-af-b-*` 目录中的 `models.csv` 另含 `b_ms`；汇总中的 `hit_change_pp`、`WAPE_change_pp` 给出校准后三参数模型减公式（1）校准基线的百分点差值。
+
 ## 开发侧验证边界
 
 控制检查使用 CPU NVML fixture 和真实 Python 线程，覆盖只读无写入、UUID、功率单位、频点并集、5 次预热/5 次测量及能量式、20 个短窗口、错误功率拒绝、停止时在途查询、延迟写盘、异常/Ctrl+C/SIGTERM 恢复及禁止并发关闭 NVML。源码检查核对六个保留函数与作者版本一致。

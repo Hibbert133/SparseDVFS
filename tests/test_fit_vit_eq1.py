@@ -12,6 +12,19 @@ import fit_vit_af as af
 
 
 class Eq1FitTests(unittest.TestCase):
+    def test_af_intercept_recovers_all_coefficients_in_mhz(self):
+        freq = np.arange(180., 3091., 7.5)
+        truth = (0.00012, 0.18, 175.)
+        latency = truth[0] * freq + truth[1] + truth[2] / freq
+        for relative in (False, True):
+            np.testing.assert_allclose(af.fit_coefficients(freq, latency, relative, intercept=True), truth)
+        np.testing.assert_allclose(af.relative_calibrated(freq, latency, intercept=True), truth)
+
+    def test_intercept_can_make_interior_predictions_nonpositive(self):
+        coeff = (.001, -2.1, 1000.)
+        self.assertTrue((af.predict(np.array([200., 3000.]), coeff) > 0).all())
+        self.assertFalse(af.positive_on_sweep(200., 3000., coeff))
+
     def test_af_coefficients_and_units(self):
         f = np.arange(180., 3091., 7.5)
         for truth in ((0.00015, 200.), (-0.00001, 160.)):
