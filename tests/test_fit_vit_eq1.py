@@ -8,9 +8,19 @@ import numpy as np
 
 import fit_vit_eq1 as fit
 import fit_vit_eq1_fast as fast
+import fit_vit_af as af
 
 
 class Eq1FitTests(unittest.TestCase):
+    def test_af_coefficients_and_units(self):
+        f = np.arange(180., 3091., 7.5)
+        for truth in ((0.00015, 200.), (-0.00001, 160.)):
+            y = af.predict(f, truth)
+            self.assertTrue((y > 0).all())
+            for relative in (True, False):
+                np.testing.assert_allclose(af.fit_coefficients(f, y, relative), truth)
+            np.testing.assert_allclose(af.relative_calibrated(f, y), truth)
+
     def test_relative_line_matches_scaled_least_squares(self):
         x = np.array([0.1, 0.2, 0.4, 0.75])
         y = np.array([0.3, 0.6, 1.0, 1.2])
@@ -71,12 +81,15 @@ class Eq1FitTests(unittest.TestCase):
                 shape_rows, _, shape_report = fast.compare(p, refine_shape=True)
                 self.assertEqual(shape_report["old_hits"], report["new_hits"])
                 self.assertEqual(shape_report["old_WAPE_pct"], report["new_WAPE_pct"])
+                af_rows, _, af_report = af.analyze(p)
+                self.assertEqual(af_report["metrics"]["eq1_baseline_ms"]["hits"], report["new_hits"])
                 self.assertEqual(report["held_out"], 78)
                 self.assertEqual(report["new_hits"] - report["old_hits"], report["gained"] - report["lost"])
                 self.assertEqual(json.loads(json.dumps(summary)), summary)
                 self.assertEqual((rows[0]["train_count"], summary["held_out_cells"]), (311, 78))
-                return rows[0], fast_rows[0], shape_rows[0]
-            (first, first_fast, first_shape), (second, second_fast, second_shape) = run(0), run(1)
+                return rows[0], fast_rows[0], shape_rows[0], [(r["a_ms_per_MHz"], r["c_ms_MHz"]) for r in af_rows]
+            (first, first_fast, first_shape, first_af), (second, second_fast, second_shape, second_af) = run(0), run(1)
+            self.assertEqual(first_af, second_af)
             self.assertEqual(first_shape, second_shape)
             self.assertEqual(first_fast, second_fast)
             for key in ("intercept_ms", "C_ms_MHz", "M_ms", "knee_MHz", "knee_support"):
